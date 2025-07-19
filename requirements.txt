@@ -1,0 +1,8 @@
+torch
+torchvision
+scikit-learn
+tqdm
+wandb
+python-dotenv
+pillow
+transformers 
