@@ -1,10 +1,10 @@
 import os
-from typing import Any, Dict
-from models.model_api import APIProvider
-from typing import Optional
+from typing import Any, Dict, Optional
 import requests
 import json
 import uuid
+
+from src.models.model_api import APIProvider
 
 
 class HiveAPIProvider(APIProvider):
@@ -24,7 +24,7 @@ class HiveAPIProvider(APIProvider):
     def __init__(self):
         super().__init__()
         self.api_key = os.environ.get("HIVE_API_KEY")
-        self.endpoint = "https://api.hivemoderation.com/api/v2/task/sync"
+        self.endpoint = 'https://api.thehive.ai/api/v3/task/sync' #"https://api.hivemoderation.com/api/v2/task/sync"
         # Initialize any other required attributes here
 
     def predict(self, image_path: str, user_id: str = None, post_id: str = None) -> Dict[str, Any]:
@@ -34,16 +34,17 @@ class HiveAPIProvider(APIProvider):
             post_id = str(uuid.uuid4())
 
         headers = {
-            'authorization': f'token {self.api_key}',
-            'Content-Type': 'application/json'
+            'Authorization': f'Token {self.api_key}',
+            # 'Content-Type': 'application/json'
         }
         # For local files, we need to upload the file. The API supports file uploads via multipart/form-data.
         # But the docs show url-based submission. We'll use file upload for local images.
+        # https://docs.thehive.ai/reference/submit-a-task-synchronously
         with open(image_path, 'rb') as f:
-            files = {'media': f}
+            files = {'image': f}
             data = {
                 'user_id': user_id,
-                'post_id': post_id
+                'post_id': post_id,
             }
             response = requests.post(self.endpoint, headers=headers, files=files, data=data)
         try:

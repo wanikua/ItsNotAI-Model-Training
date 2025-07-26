@@ -14,8 +14,8 @@ class AIRecognitionDataset(Dataset):
     def __init__(self, *, shuffle: bool = False) -> None:
         super().__init__()
         self.root_dir = Path("data/test/archive")
-        self.real_dir = self.root_dir / Path("fake-v2")
-        self.fake_dir = self.root_dir / Path("real")
+        self.fake_dir = self.root_dir / Path("fake-v2")
+        self.real_dir = self.root_dir / Path("real")
 
         paths = self.get_paths()
         self.data = paths["real"] + paths["fake"]
