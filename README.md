@@ -4,12 +4,15 @@ This repo is used to evaluate different models for detecting AI-generated images
 
 ## Roadmap
 - [x] setup initial API and project structure
-- [ ] Evaluate multiple API providers (Hive, Sightengine, etc.) and local models
-- [ ] Metrics: accuracy, recall, precision, F1
-- [ ] Add more local model support
-- [ ] Improve dataset and evaluation flexibility
+- [x] Metrics: accuracy, recall, precision, F1
+- [x] Add more local model support
+- [x] Improve dataset and evaluation flexibility
+- [x] Add automated reporting and visualization
+- [x] Evaluate Huggingface models 
+- [ ] Evaluate multiple API providers (Hive, Sightengine, etc.) 
 - [ ] Add more API providers
-- [ ] Add automated reporting and visualization
+- [ ] Analyze model and dataset (e.g. which types of images are likely to be misclassified, cluster classfication)
+- [ ] Evaluate models from recent papers
 
 ### Later
 Migrate to MLFlow and deploy on AWS
