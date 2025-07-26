@@ -2,14 +2,17 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 import torch
+from torchvision import transforms
 from PIL import Image as PILImage
 from transformers import (
     AutoFeatureExtractor, AutoModelForImageClassification, AutoImageProcessor, pipeline,
     SiglipForImageClassification
 )
+from timm import create_model
+from huggingface_hub import hf_hub_download
 
 from src.models.model_api import HuggingFaceModel
-from src.utils.model_utils import sanitize_label
+from src.utils.model_utils import sanitize_label, get_device
 
 class HfModelOutput(BaseModel):
     label: str          
@@ -26,10 +29,11 @@ class AIOrNotHfModel(HuggingFaceModel):
         self.labels = ["Real", "AI"]
         self.feature_extractor = AutoFeatureExtractor.from_pretrained("Nahrawy/AIorNot")
         self.model = AutoModelForImageClassification.from_pretrained("Nahrawy/AIorNot")
+        self.device = get_device()
         print(f"[{self.__class__.__name__}] Model initialization done.")
 
     def predict(self, img: torch.Tensor, *, with_probs: bool = False) -> str:
-        inputs = self.feature_extractor(img, return_tensors="pt")
+        inputs = self.feature_extractor(img, return_tensors="pt").to(self.device)
         
         with torch.no_grad():
             outputs = self.model(**inputs)
@@ -53,10 +57,11 @@ class SDXLDetectorHfModel(HuggingFaceModel):
         self.labels = ["Real", "AI"]
         self.processor = AutoImageProcessor.from_pretrained("Organika/sdxl-detector")
         self.model = AutoModelForImageClassification.from_pretrained("Organika/sdxl-detector")
+        self.device = get_device()
         print(f"[{self.__class__.__name__}] Model initialization done.")
 
     def predict(self, img: PILImage, *, with_probs: bool = False) -> str:
-        inputs = self.processor(img, return_tensors="pt")
+        inputs = self.processor(img, return_tensors="pt").to(self.device)
         
         with torch.no_grad():
             outputs = self.model(**inputs)
@@ -78,7 +83,7 @@ class AIVSHumanImageDetectorHfModel(HuggingFaceModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.model_identifier = r"Ateeqq/ai-vs-human-image-detector"
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = get_device()
         
         # Load Model and Processor
         try:
@@ -99,7 +104,7 @@ class AIVSHumanImageDetectorHfModel(HuggingFaceModel):
     
 
     def predict(self, img: PILImage, *, with_probs: bool = False) -> str:
-        inputs = self.processor(img, return_tensors="pt")
+        inputs = self.processor(img, return_tensors="pt").to(self.device)
         
         with torch.no_grad():
             outputs = self.model(**inputs)
@@ -113,6 +118,55 @@ class AIVSHumanImageDetectorHfModel(HuggingFaceModel):
                 return HfModelOutput(label=label, probs=probs)
 
             return HfModelOutput(label=label)
+        
+        
+class DafilabAIImageDetectorHfModel(HuggingFaceModel):
+    """
+        https://huggingface.co/Dafilab/ai-image-detector 
+    """
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    
+        # Parameters
+        IMG_SIZE = 380
+        self.device = get_device()
+        self.label_mapping = {1: "human", 0: "ai"}
+
+        # Download model from HuggingFace Hub
+        MODEL_PATH = hf_hub_download(repo_id="Dafilab/ai-image-detector", filename="pytorch_model.pth")
+
+        # Preprocessing
+        self.transform = transforms.Compose([
+            transforms.Resize(IMG_SIZE + 20),
+            transforms.CenterCrop(IMG_SIZE),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+
+        # Load model
+        self.model = create_model('efficientnet_b4', pretrained=False, num_classes=2)
+        self.model.load_state_dict(torch.load(MODEL_PATH, map_location=self.device))
+        self.model.to(self.device).eval()
+        
+        print(f"[{self.__class__.__name__}] Model initialization done.")
+
+
+    def predict(self, img: PILImage, *, with_probs: bool = False) -> str:
+        img = self.transform(img).unsqueeze(0).to(self.device)
+        
+        with torch.no_grad():
+            logits = self.model(img)
+            probs = torch.nn.functional.softmax(logits, dim=1)
+            predicted_class = torch.argmax(probs, dim=1).item()
+            label = sanitize_label(self.label_mapping[predicted_class])
+            
+            if with_probs:
+                probs = probs[0].tolist()
+                return HfModelOutput(label=label, probs=probs)
+
+            return HfModelOutput(label=label)
+    
         
     
        

@@ -1,3 +1,5 @@
+import torch
+
 def sanitize_label(label: str) -> str:
     """
     Convert a free-form label that means “real / human” or “fake / AI”
@@ -14,3 +16,6 @@ def sanitize_label(label: str) -> str:
         return "fake"
 
     raise ValueError(f"Unrecognized label: {label!r}")
+
+def get_device():
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
