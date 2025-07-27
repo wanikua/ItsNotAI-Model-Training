@@ -2,7 +2,8 @@
 A generric wrapper for all models
 """
 from abc import ABC, abstractmethod
-from typing import Any
+from pydantic import BaseModel
+from typing import Any, Optional, List
 
 class DiscriminatorModel(ABC):
     """
@@ -42,3 +43,8 @@ class APIProvider(DiscriminatorModel):
     def __init__(self, *args, **kwargs):
         super().__init__(self.__class__.__name__, *args, **kwargs)  
         self.provider = ""
+        
+
+class HfModelOutput(BaseModel):
+    label: str          
+    probs: Optional[List[float]]

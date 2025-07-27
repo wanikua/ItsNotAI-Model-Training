@@ -1,9 +1,6 @@
-from pydantic import BaseModel
-from typing import List, Optional
-
 import torch
 from torchvision import transforms
-from PIL import Image as PILImage
+from PIL.Image import Image as PILImage
 from transformers import (
     AutoFeatureExtractor, AutoModelForImageClassification, AutoImageProcessor, pipeline,
     SiglipForImageClassification
@@ -11,12 +8,8 @@ from transformers import (
 from timm import create_model
 from huggingface_hub import hf_hub_download
 
-from src.models.model_api import HuggingFaceModel
-from src.utils.model_utils import sanitize_label, get_device
-
-class HfModelOutput(BaseModel):
-    label: str          
-    probs: Optional[List[float]]
+from src.models.model_api import HuggingFaceModel, HfModelOutput
+from src.utils.model_utils import sanitize_label, get_device, BatchableMixin
     
 
 class AIOrNotHfModel(HuggingFaceModel):
@@ -32,14 +25,14 @@ class AIOrNotHfModel(HuggingFaceModel):
         self.device = get_device()
         print(f"[{self.__class__.__name__}] Model initialization done.")
 
-    def predict(self, img: torch.Tensor, *, with_probs: bool = False) -> str:
+    def predict(self, img: PILImage, *, with_probs: bool = False) -> str:
         inputs = self.feature_extractor(img, return_tensors="pt").to(self.device)
         
         with torch.no_grad():
             outputs = self.model(**inputs)
             logits = outputs.logits
             prediction = logits.argmax(-1).item()
-            label = sanitize_label(self.labels[prediction])
+            label = sanitize_label([self.labels[prediction]])[0]
 
         if with_probs:
             probs = torch.softmax(logits, dim=-1)[-1].tolist()
@@ -54,23 +47,23 @@ class SDXLDetectorHfModel(HuggingFaceModel):
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.labels = ["Real", "AI"]
+        self.labels = ["AI", "Real"]
         self.processor = AutoImageProcessor.from_pretrained("Organika/sdxl-detector")
         self.model = AutoModelForImageClassification.from_pretrained("Organika/sdxl-detector")
         self.device = get_device()
         print(f"[{self.__class__.__name__}] Model initialization done.")
 
-    def predict(self, img: PILImage, *, with_probs: bool = False) -> str:
+    def predict(self, img: PILImage, *, with_probs: bool = False) -> list[HfModelOutput]:
         inputs = self.processor(img, return_tensors="pt").to(self.device)
         
         with torch.no_grad():
             outputs = self.model(**inputs)
             logits = outputs.logits
             prediction = logits.argmax(-1).item()
-            label = sanitize_label(self.labels[prediction])
+            label = sanitize_label([self.labels[prediction]])[0]
             
             if with_probs:
-                probs = torch.softmax(logits, dim=-1)[-1].tolist()
+                probs = torch.softmax(logits, dim=-1)[-1].tolist() 
                 return HfModelOutput(label=label, probs=probs)
                 
         return HfModelOutput(label=label)
@@ -110,7 +103,7 @@ class AIVSHumanImageDetectorHfModel(HuggingFaceModel):
             outputs = self.model(**inputs)
             logits = outputs.logits
             prediction_idx = logits.argmax(-1).item()
-            label = sanitize_label(self.model.config.id2label[prediction_idx])
+            label = sanitize_label([self.model.config.id2label[prediction_idx]])[0]
             
             if with_probs:
                 probs = torch.softmax(logits, dim=-1)[-1].tolist()
@@ -159,7 +152,7 @@ class DafilabAIImageDetectorHfModel(HuggingFaceModel):
             logits = self.model(img)
             probs = torch.nn.functional.softmax(logits, dim=1)
             predicted_class = torch.argmax(probs, dim=1).item()
-            label = sanitize_label(self.label_mapping[predicted_class])
+            label = sanitize_label([self.label_mapping[predicted_class]])[0]
             
             if with_probs:
                 probs = probs[0].tolist()
