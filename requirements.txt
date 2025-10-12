@@ -5,4 +5,14 @@ tqdm
 wandb
 python-dotenv
 pillow
-transformers 
+transformers
+streamlit
+mlflow
+opencv-python
+pandas
+numpy
+langchain
+langchain-core
+langchain-openai
+langchain-google-genai
+langchain-google-vertexai 

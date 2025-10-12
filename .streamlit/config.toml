@@ -1,0 +1,16 @@
+[server]
+# Disable file watcher for better performance and to avoid torch module issues
+fileWatcherType = "none"
+headless = true
+
+[client]
+# Show error details in development
+showErrorDetails = true
+
+[runner]
+# Set magic commands to false to avoid import issues
+magicEnabled = false
+
+[logger]
+# Reduce logging level to avoid spam
+level = "warning"

@@ -25,7 +25,7 @@ class AIOrNotHfModel(HuggingFaceModel):
         self.device = get_device()
         print(f"[{self.__class__.__name__}] Model initialization done.")
 
-    def predict(self, img: PILImage, *, with_probs: bool = False) -> str:
+    def predict(self, img: PILImage, *, with_probs: bool = True) -> HfModelOutput:
         inputs = self.feature_extractor(img, return_tensors="pt").to(self.device)
         
         with torch.no_grad():
@@ -33,12 +33,11 @@ class AIOrNotHfModel(HuggingFaceModel):
             logits = outputs.logits
             prediction = logits.argmax(-1).item()
             label = sanitize_label([self.labels[prediction]])[0]
-
-        if with_probs:
+            
+            # Always calculate probabilities for unified interface
             probs = torch.softmax(logits, dim=-1)[-1].tolist()
-            return HfModelOutput(label=label, probs=probs)
-                
-        return HfModelOutput(label=label)
+
+        return HfModelOutput(label=label, probs=probs)
 
 
 class SDXLDetectorHfModel(HuggingFaceModel):
@@ -53,7 +52,7 @@ class SDXLDetectorHfModel(HuggingFaceModel):
         self.device = get_device()
         print(f"[{self.__class__.__name__}] Model initialization done.")
 
-    def predict(self, img: PILImage, *, with_probs: bool = False) -> list[HfModelOutput]:
+    def predict(self, img: PILImage, *, with_probs: bool = True) -> HfModelOutput:
         inputs = self.processor(img, return_tensors="pt").to(self.device)
         
         with torch.no_grad():
@@ -62,11 +61,10 @@ class SDXLDetectorHfModel(HuggingFaceModel):
             prediction = logits.argmax(-1).item()
             label = sanitize_label([self.labels[prediction]])[0]
             
-            if with_probs:
-                probs = torch.softmax(logits, dim=-1)[-1].tolist() 
-                return HfModelOutput(label=label, probs=probs)
+            # Always calculate probabilities for unified interface
+            probs = torch.softmax(logits, dim=-1)[-1].tolist() 
                 
-        return HfModelOutput(label=label)
+        return HfModelOutput(label=label, probs=probs)
     
     
 class AIVSHumanImageDetectorHfModel(HuggingFaceModel):
@@ -96,7 +94,7 @@ class AIVSHumanImageDetectorHfModel(HuggingFaceModel):
         print(f"[{self.__class__.__name__}] Model initialization done.")
     
 
-    def predict(self, img: PILImage, *, with_probs: bool = False) -> str:
+    def predict(self, img: PILImage, *, with_probs: bool = True) -> HfModelOutput:
         inputs = self.processor(img, return_tensors="pt").to(self.device)
         
         with torch.no_grad():
@@ -105,12 +103,10 @@ class AIVSHumanImageDetectorHfModel(HuggingFaceModel):
             prediction_idx = logits.argmax(-1).item()
             label = sanitize_label([self.model.config.id2label[prediction_idx]])[0]
             
-            if with_probs:
-                probs = torch.softmax(logits, dim=-1)[-1].tolist()
-                # predicted_prob = probabilities[0, predicted_class_idx].item()
-                return HfModelOutput(label=label, probs=probs)
+            # Always calculate probabilities for unified interface
+            probs = torch.softmax(logits, dim=-1)[-1].tolist()
 
-            return HfModelOutput(label=label)
+            return HfModelOutput(label=label, probs=probs)
         
         
 class DafilabAIImageDetectorHfModel(HuggingFaceModel):
@@ -145,7 +141,7 @@ class DafilabAIImageDetectorHfModel(HuggingFaceModel):
         print(f"[{self.__class__.__name__}] Model initialization done.")
 
 
-    def predict(self, img: PILImage, *, with_probs: bool = False) -> str:
+    def predict(self, img: PILImage, *, with_probs: bool = True) -> HfModelOutput:
         img = self.transform(img).unsqueeze(0).to(self.device)
         
         with torch.no_grad():
@@ -154,11 +150,10 @@ class DafilabAIImageDetectorHfModel(HuggingFaceModel):
             predicted_class = torch.argmax(probs, dim=1).item()
             label = sanitize_label([self.label_mapping[predicted_class]])[0]
             
-            if with_probs:
-                probs = probs[0].tolist()
-                return HfModelOutput(label=label, probs=probs)
+            # Always calculate probabilities for unified interface
+            probs_list = probs[0].tolist()
 
-            return HfModelOutput(label=label)
+            return HfModelOutput(label=label, probs=probs_list)
     
         
     
