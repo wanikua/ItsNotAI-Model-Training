@@ -57,3 +57,14 @@ ItsNotAi-model-backend/
 ├── .gitignore
 └── README.md
 ``` 
+
+
+## Demo
+We provide a demo in ```src/mlflow/dashboard```. To use the it, first install the dependencies and start the MLFlow tracking server from the worksapce:
+
+   ```mlflow server --host 127.0.0.1 --port 8080```
+
+Then, start the Streamlit server to view the demo on your local machine:
+
+   ```python dashboard.py```
+
