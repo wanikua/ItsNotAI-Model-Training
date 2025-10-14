@@ -19,6 +19,27 @@ Migrate to MLFlow and deploy on AWS
 
 ## Installation
 
+### Option 1: Using the install script (Recommended)
+
+1. **Clone the repository:**
+   ```bash
+   git clone <repo-url>
+   cd ItsNotAi-model-backend
+   ```
+
+2. **Run the installation script:**
+   ```bash
+   chmod +x install.sh
+   ./install.sh
+   ```
+   The script will:
+   - Create a virtual environment in `venv/`
+   - Install all required dependencies
+   - Set up a `.env` file from the template
+   - Provide guidance on next steps
+
+### Option 2: Manual installation
+
 1. **Clone the repository:**
    ```bash
    git clone <repo-url>
@@ -29,18 +50,46 @@ Migrate to MLFlow and deploy on AWS
    ```bash
    python3 -m venv .venv
    source .venv/bin/activate
+   pip install --upgrade pip
    pip install -e .
+   ```
+
+3. **Install development dependencies (optional):**
+   ```bash
+   pip install -e ".[dev]"
+   ```
+
+4. **Set up the environment file:**
+   ```bash
+   cp .env.example .env
+   # Edit .env file with your API keys
    ```
 
 ## Environment Variables
 
-- Create a `.env` file in the project root for secrets (API keys, WandB, etc.):
-  ```env
-  WANDB_API_KEY=your_wandb_api_key
-  HIVE_API_KEY=your_hive_api_key
-  SIGHTENGINE_API_USER=your_sightengine_user
-  SIGHTENGINE_API_SECRET=your_sightengine_secret
-  ```
+The application uses various API services for model inference and VLM analysis. Configure your `.env` file with the following variables:
+
+### Required API Keys:
+
+```env
+# WandB for experiment tracking
+WANDB_API_KEY=your_wandb_api_key
+
+# External Model API providers
+HIVE_API_KEY=your_hive_api_key
+SIGHTENGINE_API_USER=your_sightengine_user
+SIGHTENGINE_API_SECRET=your_sightengine_secret
+OPENAI_API_KEY=your_openai_api_key
+
+# VLM (Vision-Language Model) providers
+OPENAI_API_KEY=your_openai_api_key  # For OpenAI VLM models
+GOOGLE_API_KEY=your_google_api_key  # For Google Gemini models
+
+# Dataset configuration (optional)
+DATASET_ROOT=path/to/dataset  # Default: data/test/archive
+```
+
+> **Note**: Without the relevant API keys, certain features like API provider model inference or VLM analysis will be unavailable, but the core functionality with MLflow models and HuggingFace models will still work.
 
 ## Project Structure
 

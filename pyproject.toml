@@ -2,22 +2,90 @@
 name = "itsnotai-model-backend"
 version = "0.1.0"
 description = "Evaluate models to detect AI-generated images."
-authors = ["Han Xi <xihan99425@gmail.com>"]
+authors = [
+    {name = "Han Xi", email = "xihan99425@gmail.com"}
+]
+readme = "README.md"
 requires-python = ">=3.9"
+license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+
 dependencies = [
-    "torch",
-    "torchvision",
-    "scikit-learn",
-    "tqdm",
-    "wandb",
-    "python-dotenv",
-    "pillow",
-    "transformers"
+    # Core ML libraries
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "scikit-learn>=1.0.0",
+    "numpy>=1.22.0",
+    "pandas>=1.5.0",
+    
+    # Image processing
+    "pillow>=9.0.0",
+    "opencv-python>=4.5.0",
+    
+    # Model libraries
+    "transformers>=4.20.0",
+    "mlflow>=2.0.0",
+    "huggingface-hub>=0.12.0",
+    "timm>=0.6.0",
+    "pydantic>=1.10.0",
+    
+    # UI and visualization
+    "streamlit>=1.18.0",
+    
+    # VLM integration
+    "langchain>=0.0.267",
+    "langchain-core>=0.0.10",
+    "langchain-openai>=0.0.1",
+    "langchain-google-genai>=0.0.1",
+    "langchain-google-vertexai>=0.0.1", 
+    
+    # Utilities
+    "tqdm>=4.65.0",
+    "wandb>=0.15.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
 ]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+
+[tool.black]
+line-length = 88
+target-version = ["py39", "py310"]
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+line_length = 88
+multi_line_output = 3
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
