@@ -27,6 +27,7 @@ class TrainingConfig:
     include_artifact: bool = True
     include_flux: bool = True
     balance_classes: bool = True
+    multiclass: bool = False  # 多分类模式: 识别具体生成器
     
     # 训练配置
     batch_size: int = 32  # Large model 需要更小 batch 或更多显存
@@ -109,6 +110,31 @@ class TrainingConfig:
             limit=200,
             eval_every_n_steps=50,
             log_every_n_steps=10,
+        )
+
+    @classmethod
+    def for_multiclass(cls) -> "TrainingConfig":
+        """多分类配置 - 识别具体生成器"""
+        return cls(
+            multiclass=True,
+            balance_classes=False,  # 多分类不平衡类别
+            num_epochs=15,  # 多分类需要更多 epochs
+            learning_rate=5e-6,  # 更小的学习率
+        )
+
+    @classmethod
+    def for_colab_multiclass(cls) -> "TrainingConfig":
+        """Colab A100 多分类配置"""
+        return cls(
+            multiclass=True,
+            balance_classes=False,
+            batch_size=64,  # A100 可以大一些
+            use_amp=True,
+            num_workers=2,
+            num_epochs=15,
+            learning_rate=5e-6,
+            data_root=Path('/content/data'),
+            output_dir=Path('/content/outputs'),
         )
 
 

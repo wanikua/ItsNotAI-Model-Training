@@ -81,33 +81,27 @@ class FocalLoss(nn.Module):
 
 
 class Trainer:
-    """ViT 训练器"""
-    
+    """ViT 训练器 - 支持二分类和多分类模式"""
+
     def __init__(self, config: TrainingConfig):
         self.config = config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
+        self.multiclass = getattr(config, 'multiclass', False)
+
         print(f"\n{'='*60}")
         print(f"🚀 ViT AI Image Detector Trainer")
         print(f"{'='*60}")
         print(f"Device: {self.device}")
+        print(f"Mode: {'Multi-class (Source Detection)' if self.multiclass else 'Binary (Real/Fake)'}")
         if torch.cuda.is_available():
             print(f"GPU: {torch.cuda.get_device_name(0)}")
             print(f"Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
         print(f"{'='*60}\n")
-        
+
         # 设置随机种子
         self._set_seed(config.seed)
-        
-        # 初始化模型
-        self.model = ViTDetector(
-            model_name=config.model_name,
-            freeze_backbone=config.freeze_backbone,
-            dropout=config.dropout,
-            drop_path_rate=config.drop_path_rate,
-        )
-        
-        # 初始化数据加载器
+
+        # 初始化数据加载器 (先加载数据集以获取类别数)
         self.train_loader, self.val_loader, self.test_loader = create_dataloaders(
             data_root=config.data_root,
             batch_size=config.batch_size,
@@ -116,6 +110,28 @@ class Trainer:
             include_artifact=config.include_artifact,
             include_flux=config.include_flux,
             balance_classes=config.balance_classes,
+            multiclass=self.multiclass,
+        )
+
+        # 获取类别信息
+        train_ds = self.train_loader.dataset
+        self.num_classes = train_ds.get_num_classes()
+        self.source_names = train_ds.get_source_names()
+        self.source_is_real = train_ds.get_source_is_real()
+
+        print(f"  Classes: {self.num_classes}")
+        if self.multiclass and self.num_classes <= 10:
+            print(f"  Sources: {self.source_names}")
+
+        # 初始化模型
+        self.model = ViTDetector(
+            model_name=config.model_name,
+            num_labels=self.num_classes,
+            freeze_backbone=config.freeze_backbone,
+            dropout=config.dropout,
+            drop_path_rate=config.drop_path_rate,
+            source_names=self.source_names if self.multiclass else None,
+            source_is_real=self.source_is_real if self.multiclass else None,
         )
         
         # 优化器
@@ -325,58 +341,71 @@ class Trainer:
                 }, self.global_step)
         
         # Epoch 统计
+        avg_mode = "weighted" if self.multiclass else "binary"
         metrics = {
             "loss": total_loss / len(self.train_loader),
             "accuracy": accuracy_score(all_labels, all_preds),
-            "precision": precision_score(all_labels, all_preds, average="binary"),
-            "recall": recall_score(all_labels, all_preds, average="binary"),
-            "f1": f1_score(all_labels, all_preds, average="binary"),
+            "precision": precision_score(all_labels, all_preds, average=avg_mode, zero_division=0),
+            "recall": recall_score(all_labels, all_preds, average=avg_mode, zero_division=0),
+            "f1": f1_score(all_labels, all_preds, average=avg_mode, zero_division=0),
         }
-        
+
         return metrics
     
     @torch.no_grad()
     def evaluate(self, loader: Optional[DataLoader] = None) -> Dict[str, float]:
         """评估模型"""
         self.model.eval()
-        
+
         if loader is None:
             loader = self.val_loader
-        
+
         all_preds = []
         all_labels = []
         all_probs = []
         total_loss = 0.0
-        
+
         for images, labels in tqdm(loader, desc="Evaluating", leave=False):
             images = images.to(self.device)
             labels = labels.to(self.device)
-            
+
             outputs = self.model(images)
             loss = self.criterion(outputs["logits"], labels)
-            
+
             total_loss += loss.item()
             preds = outputs["logits"].argmax(-1).cpu().tolist()
-            probs = outputs["probs"][:, 1].cpu().tolist()  # P(fake)
-            
+
+            if self.multiclass:
+                # 多分类: 保存所有类别的概率
+                all_probs.extend(outputs["probs"].cpu().tolist())
+            else:
+                # 二分类: 只保存 P(fake)
+                all_probs.extend(outputs["probs"][:, 1].cpu().tolist())
+
             all_preds.extend(preds)
             all_labels.extend(labels.cpu().tolist())
-            all_probs.extend(probs)
-        
+
+        avg_mode = "weighted" if self.multiclass else "binary"
         metrics = {
             "loss": total_loss / len(loader),
             "accuracy": accuracy_score(all_labels, all_preds),
-            "precision": precision_score(all_labels, all_preds, average="binary", zero_division=0),
-            "recall": recall_score(all_labels, all_preds, average="binary", zero_division=0),
-            "f1": f1_score(all_labels, all_preds, average="binary", zero_division=0),
+            "precision": precision_score(all_labels, all_preds, average=avg_mode, zero_division=0),
+            "recall": recall_score(all_labels, all_preds, average=avg_mode, zero_division=0),
+            "f1": f1_score(all_labels, all_preds, average=avg_mode, zero_division=0),
         }
-        
-        # AUC (需要足够的正负样本)
+
+        # AUC
         try:
-            metrics["auc"] = roc_auc_score(all_labels, all_probs)
+            if self.multiclass:
+                # 多分类 AUC (one-vs-rest)
+                metrics["auc"] = roc_auc_score(
+                    all_labels, all_probs, multi_class="ovr", average="weighted"
+                )
+            else:
+                metrics["auc"] = roc_auc_score(all_labels, all_probs)
         except:
             metrics["auc"] = 0.0
-        
+
         return metrics
     
     def save_checkpoint(self, epoch: int, metrics: Dict[str, float], is_best: bool = False):
