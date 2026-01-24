@@ -55,6 +55,30 @@ from src.training.config import TrainingConfig
 # 评估指标
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 
+class FocalLoss(nn.Module):
+    """
+    Focal Loss for addressing class imbalance
+    FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
+    """
+    def __init__(self, gamma=2.0, alpha=None, label_smoothing=0.0):
+        super().__init__()
+        self.gamma = gamma
+        self.alpha = alpha
+        self.ce_loss = nn.CrossEntropyLoss(
+            reduction='none', 
+            label_smoothing=label_smoothing
+        )
+
+    def forward(self, inputs, targets):
+        ce_loss = self.ce_loss(inputs, targets)
+        pt = torch.exp(-ce_loss)
+        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
+        
+        if self.alpha is not None:
+            pass 
+            
+        return focal_loss.mean()
+
 
 class Trainer:
     """ViT 训练器"""
@@ -80,6 +104,7 @@ class Trainer:
             model_name=config.model_name,
             freeze_backbone=config.freeze_backbone,
             dropout=config.dropout,
+            drop_path_rate=config.drop_path_rate,
         )
         
         # 初始化数据加载器
@@ -110,6 +135,34 @@ class Trainer:
         # 训练状态
         self.global_step = 0
         self.best_val_acc = 0.0
+        self.patience_counter = 0
+        
+        # 实验追踪初始化
+        self._init_tracking()
+        
+    def _create_criterion(self):
+        """创建损失函数"""
+        if self.config.loss_type == "focal":
+            return FocalLoss(
+                gamma=2.0, 
+                alpha=None,  # 如果数据已平衡，不需要 alpha
+                label_smoothing=self.config.label_smoothing
+            )
+        else:
+            return nn.CrossEntropyLoss(
+                label_smoothing=self.config.label_smoothing
+            )
+            
+    def _set_seed(self, seed: int):
+        """设置随机种子"""
+        import random
+        import numpy as np
+        
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
 # ... (skip to train_epoch loop) ...
         for batch_idx, (images, labels) in enumerate(pbar):
             images = images.to(self.device)
