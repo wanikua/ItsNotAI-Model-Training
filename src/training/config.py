@@ -13,10 +13,13 @@ class TrainingConfig:
     """训练配置"""
     
     # 模型配置
-    model_name: str = "google/vit-base-patch16-224"
+    # SOTA 推荐: microsoft/beit-large-patch16-224 (需要 timm)
+    # 备选: google/vit-large-patch16-224
+    model_name: str = "microsoft/beit-large-patch16-224"
     num_labels: int = 2
     freeze_backbone: bool = False
     dropout: float = 0.1
+    drop_path_rate: float = 0.1  # Stochastic Depth for large models
     
     # 数据配置
     data_root: Optional[Path] = None
@@ -26,13 +29,17 @@ class TrainingConfig:
     balance_classes: bool = True
     
     # 训练配置
-    batch_size: int = 64  # A100 可以用更大的 batch
-    num_epochs: int = 5
-    learning_rate: float = 2e-5
-    weight_decay: float = 0.01
+    batch_size: int = 32  # Large model 需要更小 batch 或更多显存
+    num_epochs: int = 10  # Large model 需要更多 epochs
+    learning_rate: float = 1e-5  # Large model 需要更小 LR
+    weight_decay: float = 0.05
     warmup_ratio: float = 0.1
-    gradient_accumulation_steps: int = 1
+    gradient_accumulation_steps: int = 4  # 模拟大 Batch
     max_grad_norm: float = 1.0
+    
+    # 损失函数
+    loss_type: str = "focal"  # ce, focal
+    label_smoothing: float = 0.1
     
     # 优化器配置
     optimizer: str = "adamw"  # adamw, adam, sgd

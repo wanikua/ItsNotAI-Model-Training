@@ -100,132 +100,17 @@ class Trainer:
         total_steps = len(self.train_loader) * config.num_epochs
         self.scheduler = self._create_scheduler(total_steps)
         
+        # 损失函数
+        self.criterion = self._create_criterion()
+        self.criterion.to(self.device)
+        
         # 混合精度
         self.scaler = GradScaler() if config.use_amp else None
         
         # 训练状态
         self.global_step = 0
         self.best_val_acc = 0.0
-        self.patience_counter = 0
-        
-        # 实验追踪初始化
-        self._init_tracking()
-    
-    def _set_seed(self, seed: int):
-        """设置随机种子"""
-        import random
-        import numpy as np
-        
-        random.seed(seed)
-        np.random.seed(seed)
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(seed)
-    
-    def _create_optimizer(self) -> torch.optim.Optimizer:
-        """创建优化器"""
-        config = self.config
-        
-        # 区分不同层的学习率
-        no_decay = ["bias", "LayerNorm.weight"]
-        optimizer_grouped_parameters = [
-            {
-                "params": [p for n, p in self.model.named_parameters() 
-                          if not any(nd in n for nd in no_decay)],
-                "weight_decay": config.weight_decay,
-            },
-            {
-                "params": [p for n, p in self.model.named_parameters() 
-                          if any(nd in n for nd in no_decay)],
-                "weight_decay": 0.0,
-            },
-        ]
-        
-        if config.optimizer == "adamw":
-            return torch.optim.AdamW(
-                optimizer_grouped_parameters, 
-                lr=config.learning_rate,
-            )
-        elif config.optimizer == "adam":
-            return torch.optim.Adam(
-                optimizer_grouped_parameters, 
-                lr=config.learning_rate,
-            )
-        else:
-            return torch.optim.SGD(
-                optimizer_grouped_parameters, 
-                lr=config.learning_rate,
-                momentum=0.9,
-            )
-    
-    def _create_scheduler(self, total_steps: int):
-        """创建学习率调度器"""
-        config = self.config
-        warmup_steps = int(total_steps * config.warmup_ratio)
-        
-        if config.scheduler == "cosine":
-            from torch.optim.lr_scheduler import CosineAnnealingLR
-            return CosineAnnealingLR(
-                self.optimizer, 
-                T_max=total_steps - warmup_steps,
-            )
-        elif config.scheduler == "linear":
-            from torch.optim.lr_scheduler import LinearLR
-            return LinearLR(
-                self.optimizer,
-                start_factor=1.0,
-                end_factor=0.0,
-                total_iters=total_steps,
-            )
-        else:
-            return None
-    
-    def _init_tracking(self):
-        """初始化实验追踪"""
-        config = self.config
-        
-        if config.use_mlflow and MLFLOW_AVAILABLE:
-            mlflow.set_experiment(config.experiment_name)
-            mlflow.start_run(run_name=config.run_name)
-            mlflow.log_params({
-                "model_name": config.model_name,
-                "batch_size": config.batch_size,
-                "learning_rate": config.learning_rate,
-                "num_epochs": config.num_epochs,
-                "freeze_backbone": config.freeze_backbone,
-            })
-            print("MLflow tracking enabled")
-        
-        if config.use_wandb and WANDB_AVAILABLE:
-            wandb.init(
-                project=config.experiment_name,
-                name=config.run_name,
-                config=config.__dict__,
-            )
-            print("WandB tracking enabled")
-    
-    def _log_metrics(self, metrics: Dict[str, float], step: int):
-        """记录指标"""
-        if self.config.use_mlflow and MLFLOW_AVAILABLE:
-            mlflow.log_metrics(metrics, step=step)
-        
-        if self.config.use_wandb and WANDB_AVAILABLE:
-            wandb.log(metrics, step=step)
-    
-    def train_epoch(self, epoch: int) -> Dict[str, float]:
-        """训练一个 epoch"""
-        self.model.train()
-        
-        total_loss = 0.0
-        all_preds = []
-        all_labels = []
-        
-        pbar = tqdm(
-            self.train_loader, 
-            desc=f"Epoch {epoch+1}/{self.config.num_epochs}",
-            leave=True,
-        )
-        
+# ... (skip to train_epoch loop) ...
         for batch_idx, (images, labels) in enumerate(pbar):
             images = images.to(self.device)
             labels = labels.to(self.device)
@@ -233,8 +118,9 @@ class Trainer:
             # 前向传播 (混合精度)
             if self.config.use_amp:
                 with autocast():
-                    outputs = self.model(images, labels=labels)
-                    loss = outputs["loss"]
+                    # ⚠️ 不传 labels 给 model，自己算 loss
+                    outputs = self.model(images)
+                    loss = self.criterion(outputs["logits"], labels)
                 
                 # 反向传播
                 self.scaler.scale(loss).backward()
@@ -252,8 +138,8 @@ class Trainer:
                     if self.scheduler:
                         self.scheduler.step()
             else:
-                outputs = self.model(images, labels=labels)
-                loss = outputs["loss"]
+                outputs = self.model(images)
+                loss = self.criterion(outputs["logits"], labels)
                 
                 loss.backward()
                 
@@ -326,9 +212,10 @@ class Trainer:
             images = images.to(self.device)
             labels = labels.to(self.device)
             
-            outputs = self.model(images, labels=labels)
+            outputs = self.model(images)
+            loss = self.criterion(outputs["logits"], labels)
             
-            total_loss += outputs["loss"].item()
+            total_loss += loss.item()
             preds = outputs["logits"].argmax(-1).cpu().tolist()
             probs = outputs["probs"][:, 1].cpu().tolist()  # P(fake)
             

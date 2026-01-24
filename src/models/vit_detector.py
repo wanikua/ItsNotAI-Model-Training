@@ -10,7 +10,7 @@ from typing import Optional, Tuple, Dict, Any
 from dataclasses import dataclass
 
 try:
-    from transformers import ViTForImageClassification, ViTImageProcessor
+    from transformers import AutoModelForImageClassification, AutoImageProcessor
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
@@ -40,9 +40,9 @@ except ImportError:
 
 class ViTDetector(nn.Module):
     """
-    Vision Transformer for AI Image Detection
+    Universal Vision Transformer Detector (ViT, BEiT, Swin, etc.)
     
-    基于预训练 ViT 微调的二分类模型
+    基于 AutoModel 支持多种 Transformer 架构
     输出: real (0) / fake (1)
     """
     
@@ -53,6 +53,7 @@ class ViTDetector(nn.Module):
         pretrained: bool = True,
         freeze_backbone: bool = False,
         dropout: float = 0.1,
+        drop_path_rate: float = 0.0,
     ):
         super().__init__()
         
@@ -64,21 +65,39 @@ class ViTDetector(nn.Module):
         self.device = get_device()
         
         # 加载预训练模型
-        print(f"Loading ViT model: {model_name}")
-        self.model = ViTForImageClassification.from_pretrained(
+        print(f"Loading Model: {model_name}")
+        
+        # 针对 BEiT 等模型的高级配置
+        config_kwargs = {}
+        if drop_path_rate > 0:
+            config_kwargs["drop_path_rate"] = drop_path_rate
+            
+        self.model = AutoModelForImageClassification.from_pretrained(
             model_name,
             num_labels=num_labels,
-            ignore_mismatched_sizes=True,  # 因为我们改变了分类头
+            ignore_mismatched_sizes=True,
+            **config_kwargs
         )
         
         # 加载图像处理器
-        self.processor = ViTImageProcessor.from_pretrained(model_name)
+        self.processor = AutoImageProcessor.from_pretrained(model_name)
         
         # 可选: 冻结 backbone
+        # 注意: 不同模型 backbone 名字不同 (vit, beit, swin...)
         if freeze_backbone:
-            for param in self.model.vit.parameters():
-                param.requires_grad = False
-            print("Backbone frozen, only training classifier head")
+            # 尝试找到 backbone 模块
+            backbone = None
+            for name, module in self.model.named_children():
+                if name not in ["classifier", "head", "fc"]:
+                    backbone = module
+                    break
+            
+            if backbone:
+                for param in backbone.parameters():
+                    param.requires_grad = False
+                print(f"Backbone ({type(backbone).__name__}) frozen")
+            else:
+                print("Warning: Could not identify backbone to freeze")
         
         # 添加 dropout
         if dropout > 0:
@@ -203,8 +222,9 @@ class ViTDetector(nn.Module):
         super(ViTDetector, instance).__init__()
         
         instance.device = get_device()
-        instance.model = ViTForImageClassification.from_pretrained(model_path)
-        instance.processor = ViTImageProcessor.from_pretrained(model_path)
+        # Use AutoModel here as well
+        instance.model = AutoModelForImageClassification.from_pretrained(model_path)
+        instance.processor = AutoImageProcessor.from_pretrained(model_path)
         instance.model.to(instance.device)
         instance.labels = ["real", "fake"]
         instance.num_labels = 2
