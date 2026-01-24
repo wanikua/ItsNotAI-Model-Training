@@ -234,6 +234,8 @@ def prepare_combined_dataset(data_root: Optional[Path] = None) -> dict:
     """
     if data_root is None:
         data_root = get_default_data_root()
+    else:
+        data_root = Path(data_root)  # 确保是 Path 对象
     
     data_root.mkdir(parents=True, exist_ok=True)
     
@@ -262,6 +264,8 @@ def verify_dataset(data_root: Optional[Path] = None) -> dict:
     """验证数据集完整性并返回统计信息"""
     if data_root is None:
         data_root = get_default_data_root()
+    else:
+        data_root = Path(data_root)  # 确保是 Path 对象
     
     stats = {}
     img_extensions = {'.jpg', '.jpeg', '.png', '.webp', '.bmp'}
