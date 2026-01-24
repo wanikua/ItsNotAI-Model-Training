@@ -56,6 +56,11 @@ class TrainingConfig:
     use_wandb: bool = False
     experiment_name: str = "vit-ai-detector"
     run_name: Optional[str] = None
+
+    # Hugging Face Hub Upload
+    push_to_hub: bool = False
+    hub_model_id: Optional[str] = None
+    hub_token: Optional[str] = None
     
     # 输出
     output_dir: Path = field(default_factory=lambda: Path("outputs"))

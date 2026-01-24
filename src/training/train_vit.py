@@ -451,10 +451,44 @@ class Trainer:
         print(f"\n✅ Training complete! Best val accuracy: {self.best_val_acc:.4f}")
         print(f"   Model saved to: {self.config.output_dir / 'best_model'}")
         
+        # 上传到 Hugging Face Hub (可选)
+        if self.config.push_to_hub:
+            self._push_to_hub()
+            
         return test_metrics
-
-
-def main():
+    
+    def _push_to_hub(self):
+        """上传到 Hugging Face Hub"""
+        if not self.config.hub_token:
+            print("⚠️ Hub token not provided, skipping upload.")
+            return
+            
+        print(f"\n{'='*60}")
+        print("🚀 Pushing model to Hugging Face Hub...")
+        
+        try:
+            from huggingface_hub import HfApi
+            
+            api = HfApi(token=self.config.hub_token)
+            repo_id = self.config.hub_model_id
+            
+            # 创建仓库
+            api.create_repo(repo_id=repo_id, exist_ok=True)
+            
+            # 上传文件
+            api.upload_folder(
+                folder_path=str(self.config.output_dir / "best_model"),
+                repo_id=repo_id,
+                repo_type="model",
+            )
+            print(f"✅ Model uploaded to: https://huggingface.co/{repo_id}")
+            
+        except ImportError:
+            print("❌ huggingface_hub not installed.")
+        except Exception as e:
+            print(f"❌ Upload failed: {e}")
+            
+    def main():
     parser = argparse.ArgumentParser(description="Train ViT AI Image Detector")
     
     # 数据参数
@@ -478,6 +512,11 @@ def main():
     # 调试参数
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--colab", action="store_true", help="Use Colab A100 optimized config")
+    
+    # HF Hub 上传
+    parser.add_argument("--push-to-hub", action="store_true", help="Push model to HF Hub")
+    parser.add_argument("--hub-model-id", type=str, default=None, help="Repository ID (e.g., username/model-name)")
+    parser.add_argument("--hub-token", type=str, default=None, help="HF API Token")
     
     args = parser.parse_args()
     
@@ -510,6 +549,12 @@ def main():
         config.experiment_name = args.experiment_name
     if args.dry_run:
         config.dry_run = True
+        
+    # HF Hub config
+    if args.push_to_hub:
+        config.push_to_hub = True
+        config.hub_model_id = args.hub_model_id
+        config.hub_token = args.hub_token
     
     # 开始训练
     trainer = Trainer(config)
