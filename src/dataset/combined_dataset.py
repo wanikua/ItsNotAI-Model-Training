@@ -184,14 +184,15 @@ class ArtiFact_Dataset(Dataset):
             import csv
             print(f"  Found {len(metadata_files)} metadata.csv files")
             for meta_path in metadata_files:
-                source_name = meta_path.parent.name  # 使用文件夹名作为来源
+                source_dir = meta_path.parent  # metadata.csv 所在目录
+                source_name = source_dir.name  # 使用文件夹名作为来源
                 is_real = source_name.lower() in REAL_SOURCES
                 try:
                     with open(meta_path, 'r', encoding='utf-8') as f:
                         reader = csv.DictReader(f)
                         for row in reader:
-                            # image_path 是相对于 artifact 根目录的路径
-                            img_path = self.root_dir / row['image_path']
+                            # image_path 是相对于 metadata.csv 所在目录的路径
+                            img_path = source_dir / row['image_path']
                             if img_path.exists():
                                 raw_data.append((img_path, source_name, is_real))
                 except Exception as e:
