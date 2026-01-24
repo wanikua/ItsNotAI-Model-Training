@@ -375,7 +375,7 @@ class Trainer:
         except Exception as e:
             print(f"❌ Upload failed: {e}")
             
-    def main():
+def main():
     parser = argparse.ArgumentParser(description="Train ViT AI Image Detector")
     
     # 数据参数
