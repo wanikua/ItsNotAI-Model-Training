@@ -163,7 +163,94 @@ class Trainer:
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
-# ... (skip to train_epoch loop) ...
+            
+    def _create_optimizer(self) -> torch.optim.Optimizer:
+        """创建优化器"""
+        config = self.config
+        
+        # 区分不同层的学习率
+        no_decay = ["bias", "LayerNorm.weight"]
+        optimizer_grouped_parameters = [
+            {
+                "params": [p for n, p in self.model.named_parameters() 
+                          if not any(nd in n for nd in no_decay)],
+                "weight_decay": config.weight_decay,
+            },
+            {
+                "params": [p for n, p in self.model.named_parameters() 
+                          if any(nd in n for nd in no_decay)],
+                "weight_decay": 0.0,
+            },
+        ]
+        
+        if config.optimizer == "adamw":
+            return torch.optim.AdamW(
+                optimizer_grouped_parameters, 
+                lr=config.learning_rate,
+            )
+        else:
+            return torch.optim.Adam(
+                optimizer_grouped_parameters, 
+                lr=config.learning_rate,
+            )
+    
+    def _create_scheduler(self, total_steps: int):
+        """创建学习率调度器"""
+        config = self.config
+        warmup_steps = int(total_steps * config.warmup_ratio)
+        
+        if config.scheduler == "cosine":
+            from torch.optim.lr_scheduler import CosineAnnealingLR
+            return CosineAnnealingLR(
+                self.optimizer, 
+                T_max=total_steps - warmup_steps,
+            )
+        else:
+            return None
+    
+    def _init_tracking(self):
+        """初始化实验追踪"""
+        config = self.config
+        
+        if config.use_mlflow and MLFLOW_AVAILABLE:
+            try:
+                mlflow.set_experiment(config.experiment_name)
+                mlflow.start_run(run_name=config.run_name)
+                # Log simplified params
+                mlflow.log_params({"model": config.model_name})
+            except: pass
+            print("MLflow tracking enabled")
+        
+        if config.use_wandb and WANDB_AVAILABLE:
+            try:
+                wandb.init(project=config.experiment_name, config=config.__dict__)
+            except: pass
+            print("WandB tracking enabled")
+    
+    def _log_metrics(self, metrics: Dict[str, float], step: int):
+        """记录指标"""
+        if self.config.use_mlflow and MLFLOW_AVAILABLE:
+            try: mlflow.log_metrics(metrics, step=step)
+            except: pass
+        
+        if self.config.use_wandb and WANDB_AVAILABLE:
+            try: wandb.log(metrics, step=step)
+            except: pass
+    
+    def train_epoch(self, epoch: int) -> Dict[str, float]:
+        """训练一个 epoch"""
+        self.model.train()
+        
+        total_loss = 0.0
+        all_preds = []
+        all_labels = []
+        
+        pbar = tqdm(
+            self.train_loader, 
+            desc=f"Epoch {epoch+1}/{self.config.num_epochs}",
+            leave=True,
+        )
+        
         for batch_idx, (images, labels) in enumerate(pbar):
             images = images.to(self.device)
             labels = labels.to(self.device)
