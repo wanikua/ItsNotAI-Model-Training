@@ -173,19 +173,25 @@ class ArtiFact_Dataset(Dataset):
         # 首先尝试查找 metadata.csv 文件 (ArtiFact 官方格式)
         metadata_files = list(self.root_dir.rglob('metadata.csv'))
 
+        # 定义真实图片来源 (ArtiFact 数据集中的 8 个真实来源)
+        REAL_SOURCES = {
+            'imagenet', 'coco', 'lsun', 'afhq', 'ffhq',
+            'metfaces', 'celebahq', 'landscape'
+        }
+
         if metadata_files:
             # 使用 metadata.csv 加载
             import csv
             print(f"  Found {len(metadata_files)} metadata.csv files")
             for meta_path in metadata_files:
-                source_dir = meta_path.parent
-                source_name = source_dir.name  # 使用文件夹名作为来源
+                source_name = meta_path.parent.name  # 使用文件夹名作为来源
+                is_real = source_name.lower() in REAL_SOURCES
                 try:
                     with open(meta_path, 'r', encoding='utf-8') as f:
                         reader = csv.DictReader(f)
                         for row in reader:
-                            img_path = source_dir / row['image_path']
-                            is_real = int(row['target']) == 0
+                            # image_path 是相对于 artifact 根目录的路径
+                            img_path = self.root_dir / row['image_path']
                             if img_path.exists():
                                 raw_data.append((img_path, source_name, is_real))
                 except Exception as e:
