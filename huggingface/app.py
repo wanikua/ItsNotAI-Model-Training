@@ -37,7 +37,7 @@ print(f"Loaded {len(source_names)} classes")
 def predict(image: Image.Image):
     """Predict if image is real or AI-generated"""
     if image is None:
-        return None, None, "Please upload an image"
+        return None, None, "Please upload an image", None
 
     # Preprocess
     image = image.convert("RGB")
@@ -54,23 +54,32 @@ def predict(image: Image.Image):
     confidence = probs[pred_idx].item()
     is_real = source_is_real.get(predicted_source, False)
 
-    # Calculate aggregate real vs fake
-    real_prob = sum(
+    # Calculate aggregate real vs fake (human_probability vs ai_probability)
+    human_prob = sum(
         probs[i].item()
         for i, name in enumerate(source_names)
         if source_is_real.get(name, False)
     )
-    fake_prob = 1.0 - real_prob
+    ai_prob = 1.0 - human_prob
 
-    # Main result
-    if is_real:
-        main_result = f"Real Image ({confidence:.1%})"
-        result_color = "green"
-    else:
-        main_result = f"AI Generated ({confidence:.1%})"
-        result_color = "red"
+    # Get top 3 AI sources only (exclude real sources)
+    ai_sources = []
+    for i, (name, prob) in enumerate(zip(source_names, probs.tolist())):
+        if not source_is_real.get(name, False):
+            ai_sources.append({"label": name, "score": round(prob, 3)})
 
-    # Top predictions (bar chart data)
+    # Sort by score descending and take top 3
+    ai_sources.sort(key=lambda x: x["score"], reverse=True)
+    top3_sources = ai_sources[:3]
+
+    # API-style JSON output
+    api_output = {
+        "ai_probability": round(ai_prob, 3),
+        "human_probability": round(human_prob, 3),
+        "top3_sources": top3_sources
+    }
+
+    # Top predictions for bar chart (keep for UI)
     top_preds = {}
     for i, (name, prob) in enumerate(zip(source_names, probs.tolist())):
         if prob > 0.01:  # Only show >1%
@@ -96,14 +105,15 @@ def predict(image: Image.Image):
 
 | Category | Probability |
 |----------|-------------|
-| Real | {real_prob:.2%} |
-| AI Generated | {fake_prob:.2%} |
+| Real | {human_prob:.2%} |
+| AI Generated | {ai_prob:.2%} |
 """
 
     return (
-        {"Real": real_prob, "AI Generated": fake_prob},
+        {"Real": human_prob, "AI Generated": ai_prob},
         top_preds,
-        summary
+        summary,
+        api_output
     )
 
 
@@ -163,17 +173,20 @@ with gr.Blocks(css=css, title="ItsNotAI - AI Image Detector") as demo:
             # Detailed summary
             summary_md = gr.Markdown(label="Details")
 
+            # API-style JSON output
+            json_output = gr.JSON(label="API Output")
+
     # Event handlers
     submit_btn.click(
         fn=predict,
         inputs=[input_image],
-        outputs=[result_label, top_preds_label, summary_md]
+        outputs=[result_label, top_preds_label, summary_md, json_output]
     )
 
     input_image.change(
         fn=predict,
         inputs=[input_image],
-        outputs=[result_label, top_preds_label, summary_md]
+        outputs=[result_label, top_preds_label, summary_md, json_output]
     )
 
     gr.Markdown(

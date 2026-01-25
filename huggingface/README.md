@@ -107,10 +107,39 @@ This model can:
 
 ### Output Labels (33 Classes)
 
-| Type | Labels |
-|------|--------|
-| **Real (8)** | `afhq`, `celebahq`, `coco`, `ffhq`, `imagenet`, `landscape`, `lsun`, `metfaces` |
-| **AI (25)** | `big_gan`, `cips`, `cycle_gan`, `ddpm`, `denoising_diffusion_gan`, `diffusion_gan`, `face_synthetics`, `gansformer`, `gau_gan`, `generative_inpainting`, `glide`, `lama`, `latent_diffusion`, `mat`, `palette`, `pro_gan`, `projected_gan`, `sfhq`, `stable_diffusion`, `star_gan`, `stylegan1`, `stylegan2`, `stylegan3`, `taming_transformer`, `vq_diffusion` |
+**Real**: All real images (from ImageNet, COCO, FFHQ, CelebA-HQ, AFHQ, LSUN, MetFaces, Landscape)
+
+**AI Sources**:
+
+| Label | Description |
+|-------|-------------|
+| stable_diffusion | Stable Diffusion 1.x/2.x/XL |
+| latent_diffusion | Latent Diffusion Models |
+| glide | OpenAI GLIDE |
+| dalle | DALL-E series |
+| midjourney | Midjourney |
+| stylegan1 | StyleGAN v1 |
+| stylegan2 | StyleGAN v2 |
+| stylegan3 | StyleGAN v3 |
+| pro_gan | Progressive GAN |
+| big_gan | BigGAN |
+| gau_gan | GauGAN / NVIDIA Canvas |
+| cycle_gan | CycleGAN |
+| star_gan | StarGAN |
+| ddpm | Denoising Diffusion Probabilistic Models |
+| vq_diffusion | VQ-Diffusion |
+| palette | Palette Diffusion |
+| gansformer | GANsformer |
+| projected_gan | Projected GAN |
+| diffusion_gan | Diffusion GAN |
+| denoising_diffusion_gan | Denoising Diffusion GAN |
+| taming_transformer | Taming Transformers |
+| generative_inpainting | Generative Inpainting |
+| lama | LaMa Inpainting |
+| mat | MAT Inpainting |
+| cips | CIPS |
+| face_synthetics | Face Synthetics |
+| sfhq | Synthetic Faces HQ |
 
 ### Recommended Usage
 
