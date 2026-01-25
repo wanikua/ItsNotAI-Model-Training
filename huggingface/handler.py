@@ -52,18 +52,11 @@ class EndpointHandler:
             outputs = self.model(**inputs)
             probs = torch.softmax(outputs.logits, dim=-1)[0]
 
-        # Top-1 决定 + 置信度
+        # Top-1 prediction
         top_idx = probs.argmax().item()
         top_source = self.source_names[top_idx]
         top_confidence = probs[top_idx].item()
         is_real = self.source_is_real.get(top_source, False)
-
-        if is_real:
-            human_prob = top_confidence
-            ai_prob = 1.0 - human_prob
-        else:
-            ai_prob = top_confidence
-            human_prob = 1.0 - ai_prob
 
         # Get top 3 AI sources
         ai_sources = []
@@ -75,9 +68,9 @@ class EndpointHandler:
         top3_sources = ai_sources[:3]
 
         return {
-            "ai_probability": round(ai_prob, 3),
-            "human_probability": round(human_prob, 3),
             "predicted_source": top_source,
+            "is_real": is_real,
+            "confidence": round(top_confidence, 3),
             "top3_sources": top3_sources
         }
 

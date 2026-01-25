@@ -234,8 +234,10 @@ class ArtiFact_Dataset(Dataset):
         # 首先尝试查找 metadata.csv 文件 (ArtiFact 官方格式)
         metadata_files = list(self.root_dir.rglob('metadata.csv'))
 
-        # 定义真实图片来源 (ArtiFact 数据集中的 8 个真实来源)
+        # 定义真实图片来源
+        # 包括: ArtiFact 数据集的 8 个真实来源 + Defactify 的 Real
         REAL_SOURCES = {
+            'real',  # Defactify 数据集
             'imagenet', 'coco', 'lsun', 'afhq', 'ffhq',
             'metfaces', 'celebahq', 'landscape'
         }

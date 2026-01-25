@@ -54,21 +54,24 @@ model-index:
 
 > **Detect AI-generated images | Identify the AI generator | Verify human-made artwork**
 
-A state-of-the-art Vision Transformer model that detects AI-generated images with **93.5% accuracy** and identifies the specific AI generator used.
+A Vision Transformer model that detects AI-generated images and identifies the specific AI generator used (33 classes).
 
 **Website**: [https://itsnotai.org](https://itsnotai.org)
 
-> **Note**: This is one of the models used by ItsNotAI. For official verification at [itsnotai.org](https://itsnotai.org), we use an ensemble of multiple models combined with human expert review to ensure maximum accuracy.
+---
+
+## Newer Version Available
+
+| Version | Features | Link |
+|---------|----------|------|
+| **v2 (Latest)** | Dual-head, FLUX detection, improved Midjourney | [ItsNotAI-ai-detector-v2](https://huggingface.co/boluobobo/ItsNotAI-ai-detector-v2) |
+| v1 (This) | Single-head, 33-class classification | Current page |
+
+> **Recommendation**: Use [v2](https://huggingface.co/boluobobo/ItsNotAI-ai-detector-v2) for better binary (Real/AI) classification. Use v1 if you only need source identification without the binary head.
 
 ---
 
-## Demo: See It In Action
-
-| AI Generated | Real Artwork |
-|:---:|:---:|
-| ![AI Generated](https://substack-post-media.s3.amazonaws.com/public/images/c6e4cb48-6f63-426d-8e55-4f54870592a7_354x338.png) | ![Real Painting](https://substack-post-media.s3.amazonaws.com/public/images/8aba102b-5739-4fd7-8d6c-d479c702f253_1510x983.png) |
-| **Result: AI Generated (69.2%)** | **Result: Real (67.5%)** |
-| Detected: Diffusion-based model | Gauguin's "Entrance to the Village of Osny" |
+> **Note**: This is one of the models used by ItsNotAI. For official verification at [itsnotai.org](https://itsnotai.org), we use an ensemble of multiple models combined with human expert review to ensure maximum accuracy.
 
 ---
 
@@ -153,9 +156,6 @@ model_id = "boluobobo/ItsNotAI-ai-detector-v1"
 model = AutoModelForImageClassification.from_pretrained(model_id)
 processor = AutoImageProcessor.from_pretrained(model_id)
 
-# Real source labels
-REAL_LABELS = {"afhq", "celebahq", "coco", "ffhq", "imagenet", "landscape", "lsun", "metfaces"}
-
 def detect_image(image_path):
     image = Image.open(image_path).convert("RGB")
     inputs = processor(image, return_tensors="pt")
@@ -164,55 +164,42 @@ def detect_image(image_path):
         outputs = model(**inputs)
         probs = torch.softmax(outputs.logits, dim=-1)[0]
 
-    # Top-1 决定 + 置信度
-    top_idx = probs.argmax().item()
-    top_source = model.config.id2label[str(top_idx)]
-    top_confidence = probs[top_idx].item()
-    is_real = top_source in REAL_LABELS
-
-    if is_real:
-        human_prob = top_confidence
-        ai_prob = 1.0 - human_prob
-    else:
-        ai_prob = top_confidence
-        human_prob = 1.0 - ai_prob
-
-    # Get top 3 AI sources
-    ai_sources = []
-    for i, prob in enumerate(probs.tolist()):
-        label = model.config.id2label[str(i)]
-        if label not in REAL_LABELS:
-            ai_sources.append({"label": label, "score": round(prob, 3)})
-    ai_sources.sort(key=lambda x: x["score"], reverse=True)
-    top3_sources = ai_sources[:3]
+    # Get top predictions
+    top_indices = probs.argsort(descending=True)[:5]
+    predictions = []
+    for idx in top_indices:
+        label = model.config.id2label[str(idx.item())]
+        score = probs[idx].item()
+        predictions.append({"label": label, "score": round(score, 3)})
 
     return {
-        "ai_probability": round(ai_prob, 3),
-        "human_probability": round(human_prob, 3),
-        "predicted_source": top_source,
-        "top3_sources": top3_sources
+        "predicted_source": predictions[0]["label"],
+        "confidence": predictions[0]["score"],
+        "top5_predictions": predictions
     }
 
 # Example
 result = detect_image("test.jpg")
-print(f"AI Probability: {result['ai_probability']:.1%}")
-print(f"Human Probability: {result['human_probability']:.1%}")
 print(f"Predicted Source: {result['predicted_source']}")
+print(f"Confidence: {result['confidence']:.1%}")
 ```
 
 **Example Output:**
 ```json
 {
-  "ai_probability": 0.452,
-  "human_probability": 0.548,
   "predicted_source": "stable_diffusion",
-  "top3_sources": [
+  "confidence": 0.452,
+  "top5_predictions": [
     {"label": "stable_diffusion", "score": 0.452},
     {"label": "latent_diffusion", "score": 0.213},
-    {"label": "glide", "score": 0.089}
+    {"label": "glide", "score": 0.089},
+    {"label": "ddpm", "score": 0.056},
+    {"label": "imagenet", "score": 0.042}
   ]
 }
 ```
+
+> **Note**: v1 returns source classification only. For binary Real/AI detection, use [v2](https://huggingface.co/boluobobo/ItsNotAI-ai-detector-v2) with its dedicated binary head.
 
 ## Performance
 
@@ -273,42 +260,11 @@ with open(meta_path) as f:
     meta = json.load(f)
 
 source_names = meta["source_names"]
-source_is_real = meta["source_is_real"]
-
-# Check if prediction is real or AI
-predicted_source = source_names[pred_idx]
-is_real = source_is_real.get(predicted_source, False)
-
-print(f"Source: {predicted_source}")
-print(f"Is Real: {'Yes' if is_real else 'No (AI Generated)'}")
 
 # Get all probabilities
 for i, (name, prob) in enumerate(zip(source_names, probs[0].tolist())):
     if prob > 0.01:  # Show only >1%
-        marker = "Real" if source_is_real.get(name, False) else "AI"
-        print(f"  [{marker}] {name}: {prob:.2%}")
-```
-
-### Calculate Real vs Fake Probability
-
-```python
-# Top-1 决定 + 置信度
-top_idx = probs[0].argmax().item()
-top_source = source_names[top_idx]
-top_confidence = probs[0][top_idx].item()
-is_real = source_is_real.get(top_source, False)
-
-if is_real:
-    real_prob = top_confidence
-    fake_prob = 1.0 - real_prob
-else:
-    fake_prob = top_confidence
-    real_prob = 1.0 - fake_prob
-
-print(f"Predicted Source: {top_source}")
-print(f"Is Real: {'Yes' if is_real else 'No (AI Generated)'}")
-print(f"Real: {real_prob:.2%}")
-print(f"AI Generated: {fake_prob:.2%}")
+        print(f"  {name}: {prob:.2%}")
 ```
 
 ## Training Details
