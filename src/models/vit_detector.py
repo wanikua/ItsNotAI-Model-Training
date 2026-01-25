@@ -75,8 +75,10 @@ class ViTDetector(nn.Module):
         source_names: Optional[List[str]] = None,  # 多分类时的来源名称列表
         source_is_real: Optional[Dict[str, bool]] = None,  # 每个来源是否为真实
         dual_head: bool = False,  # 双头模式：多分类 + 二分类
+        binary_class_weights: Optional[List[float]] = None,  # 二分类 loss 权重 [real, ai]
     ):
         super().__init__()
+        self.binary_class_weights = binary_class_weights
 
         if not TRANSFORMERS_AVAILABLE:
             raise ImportError("transformers library required. Install with: pip install transformers")
@@ -167,33 +169,26 @@ class ViTDetector(nn.Module):
         if hasattr(self.model, 'beit'):
             # BEiT 模型
             outputs = self.model.beit(pixel_values)
-            features = outputs.last_hidden_state[:, 0]  # CLS token
+            return outputs.last_hidden_state[:, 0]  # CLS token
         elif hasattr(self.model, 'vit'):
             # ViT 模型
             outputs = self.model.vit(pixel_values)
-            features = outputs.last_hidden_state[:, 0]
+            return outputs.last_hidden_state[:, 0]
         elif hasattr(self.model, 'swin'):
             # Swin 模型
             outputs = self.model.swin(pixel_values)
-            features = outputs.pooler_output
+            return outputs.pooler_output
         else:
             # 通用方法：尝试获取 base_model
-            base_model = None
             for name, module in self.model.named_children():
                 if name not in ["classifier", "head", "fc"]:
-                    base_model = module
-                    break
+                    outputs = module(pixel_values)
+                    if hasattr(outputs, 'pooler_output') and outputs.pooler_output is not None:
+                        return outputs.pooler_output
+                    else:
+                        return outputs.last_hidden_state[:, 0]
 
-            if base_model:
-                outputs = base_model(pixel_values)
-                if hasattr(outputs, 'pooler_output') and outputs.pooler_output is not None:
-                    features = outputs.pooler_output
-                else:
-                    features = outputs.last_hidden_state[:, 0]
-            else:
-                raise ValueError("Cannot extract backbone features from this model")
-
-        return features
+            raise ValueError("Cannot extract backbone features from this model")
 
     def forward(
         self,
@@ -238,20 +233,29 @@ class ViTDetector(nn.Module):
 
             # 计算损失
             if labels is not None or binary_labels is not None:
-                loss = 0.0
                 ce_loss = nn.CrossEntropyLoss()
+                total_loss = None
 
                 if labels is not None:
                     multiclass_loss = ce_loss(multiclass_logits, labels.to(self.device))
                     result["multiclass_loss"] = multiclass_loss
-                    loss = loss + multiclass_loss
+                    total_loss = multiclass_loss
 
                 if binary_labels is not None:
-                    binary_loss = ce_loss(binary_logits, binary_labels.to(self.device))
+                    # 使用加权 loss 提升真实照片识别率
+                    if self.binary_class_weights is not None:
+                        weight = torch.tensor(self.binary_class_weights, device=self.device)
+                        binary_ce_loss = nn.CrossEntropyLoss(weight=weight)
+                    else:
+                        binary_ce_loss = ce_loss
+                    binary_loss = binary_ce_loss(binary_logits, binary_labels.to(self.device))
                     result["binary_loss"] = binary_loss
-                    loss = loss + binary_loss
+                    if total_loss is None:
+                        total_loss = binary_loss
+                    else:
+                        total_loss = total_loss + binary_loss
 
-                result["loss"] = loss
+                result["loss"] = total_loss
         else:
             # 原有模式：只有多分类
             outputs = self.model(

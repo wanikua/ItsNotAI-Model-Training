@@ -32,16 +32,77 @@ def get_default_data_root() -> Path:
     return Path('./data')
 
 
-def get_train_transforms(img_size: int = 224) -> transforms.Compose:
-    """训练用数据增强"""
-    return transforms.Compose([
-        transforms.RandomResizedCrop(img_size, scale=(0.8, 1.0)),
+class JPEGCompression:
+    """模拟 JPEG 压缩伪影"""
+    def __init__(self, quality_range=(30, 95)):
+        self.quality_range = quality_range
+
+    def __call__(self, img):
+        import io
+        quality = random.randint(*self.quality_range)
+        buffer = io.BytesIO()
+        img.save(buffer, format='JPEG', quality=quality)
+        buffer.seek(0)
+        return Image.open(buffer).convert('RGB')
+
+
+class GaussianNoise:
+    """添加高斯噪声"""
+    def __init__(self, mean=0, std_range=(0.01, 0.05)):
+        self.mean = mean
+        self.std_range = std_range
+
+    def __call__(self, tensor):
+        std = random.uniform(*self.std_range)
+        noise = torch.randn_like(tensor) * std + self.mean
+        return torch.clamp(tensor + noise, 0, 1)
+
+
+class GaussianBlur:
+    """高斯模糊"""
+    def __init__(self, kernel_size=3, sigma_range=(0.1, 2.0)):
+        self.kernel_size = kernel_size
+        self.sigma_range = sigma_range
+
+    def __call__(self, img):
+        from PIL import ImageFilter
+        sigma = random.uniform(*self.sigma_range)
+        return img.filter(ImageFilter.GaussianBlur(radius=sigma))
+
+
+def get_train_transforms(img_size: int = 224, strong_aug: bool = False) -> transforms.Compose:
+    """
+    训练用数据增强
+
+    Args:
+        img_size: 输出图像大小
+        strong_aug: 是否使用强增强（模拟社交媒体压缩等）
+    """
+    base_transforms = [
+        transforms.RandomResizedCrop(img_size, scale=(0.7, 1.0)),
         transforms.RandomHorizontalFlip(),
-        # 模拟 JPEG 压缩伪影 (通过轻微模糊和噪声)
-        transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+    ]
+
+    if strong_aug:
+        # 强增强：模拟真实场景（社交媒体压缩、截图等）
+        base_transforms.extend([
+            transforms.RandomApply([GaussianBlur(sigma_range=(0.1, 1.5))], p=0.3),
+            transforms.RandomApply([JPEGCompression(quality_range=(30, 85))], p=0.4),
+            transforms.RandomGrayscale(p=0.05),
+            transforms.RandomRotation(degrees=5),
+        ])
+
+    base_transforms.extend([
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
+
+    if strong_aug:
+        # 在 tensor 上添加噪声
+        base_transforms.append(transforms.RandomApply([GaussianNoise(std_range=(0.01, 0.03))], p=0.2))
+
+    return transforms.Compose(base_transforms)
 
 
 def get_eval_transforms(img_size: int = 224) -> transforms.Compose:
@@ -310,6 +371,7 @@ class CombinedAIDataset(Dataset):
         include_flux: bool = True,
         seed: int = 42,
         multiclass: bool = False,  # 多分类模式
+        strong_augmentation: bool = True,  # 强数据增强
     ):
         if data_root is None:
             data_root = get_default_data_root()
@@ -322,7 +384,7 @@ class CombinedAIDataset(Dataset):
         # 设置变换
         if transform is None:
             if split == "train":
-                transform = get_train_transforms()
+                transform = get_train_transforms(strong_aug=strong_augmentation)
             else:
                 transform = get_eval_transforms()
         self.transform = transform

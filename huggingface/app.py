@@ -62,21 +62,21 @@ def get_backbone_features(pixel_values):
     # 获取 backbone (BEiT 模型)
     if hasattr(model, 'beit'):
         outputs = model.beit(pixel_values)
-        features = outputs.last_hidden_state[:, 0]  # CLS token
+        return outputs.last_hidden_state[:, 0]  # CLS token
     elif hasattr(model, 'vit'):
         outputs = model.vit(pixel_values)
-        features = outputs.last_hidden_state[:, 0]
+        return outputs.last_hidden_state[:, 0]
     else:
         # 通用方法
         for name, module in model.named_children():
             if name not in ["classifier", "head", "fc"]:
                 outputs = module(pixel_values)
                 if hasattr(outputs, 'pooler_output') and outputs.pooler_output is not None:
-                    features = outputs.pooler_output
+                    return outputs.pooler_output
                 else:
-                    features = outputs.last_hidden_state[:, 0]
-                break
-    return features
+                    return outputs.last_hidden_state[:, 0]
+        # Fallback: 无法提取特征
+        raise ValueError("Cannot extract backbone features from this model")
 
 
 def predict(image: Image.Image):

@@ -29,6 +29,11 @@ class TrainingConfig:
     balance_classes: bool = True
     multiclass: bool = False  # 多分类模式: 识别具体生成器
     dual_head: bool = False   # 双头模式: 多分类 + 二分类
+    strong_augmentation: bool = True  # 强数据增强 (JPEG压缩, 噪声等)
+
+    # 二分类 loss 权重 (提升真实照片识别率)
+    # real_weight > 1.0 会让模型更倾向于预测为真实
+    binary_class_weights: Optional[List[float]] = None  # [real_weight, ai_weight], e.g. [1.5, 1.0]
     
     # 训练配置
     batch_size: int = 32  # Large model 需要更小 batch 或更多显存
@@ -147,6 +152,7 @@ class TrainingConfig:
             balance_classes=False,
             num_epochs=10,
             learning_rate=5e-6,
+            binary_class_weights=[1.5, 1.0],  # 提升真实照片识别率
         )
 
     @classmethod
@@ -163,6 +169,7 @@ class TrainingConfig:
             learning_rate=5e-6,
             data_root=Path('/content/data'),
             output_dir=Path('/content/outputs'),
+            binary_class_weights=[1.5, 1.0],  # 提升真实照片识别率
         )
 
 

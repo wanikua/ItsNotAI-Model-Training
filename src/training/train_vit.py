@@ -118,6 +118,7 @@ class Trainer:
             include_flux=config.include_flux,
             balance_classes=config.balance_classes,
             multiclass=self.multiclass,
+            strong_augmentation=getattr(config, 'strong_augmentation', True),
         )
 
         # 获取类别信息
@@ -140,6 +141,7 @@ class Trainer:
             source_names=self.source_names if self.multiclass else None,
             source_is_real=self.source_is_real if self.multiclass else None,
             dual_head=self.dual_head,
+            binary_class_weights=getattr(config, 'binary_class_weights', None),
         )
 
         # 构建 source_idx -> binary_label 映射 (双头模式)
