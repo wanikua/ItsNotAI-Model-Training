@@ -164,39 +164,48 @@ def detect_image(image_path):
         outputs = model(**inputs)
         probs = torch.softmax(outputs.logits, dim=-1)[0]
 
-    # Aggregate human vs AI probability
-    human_prob = sum(
-        probs[int(i)].item()
-        for i, label in model.config.id2label.items()
-        if label in REAL_LABELS
-    )
-    ai_prob = 1.0 - human_prob
+    # Top-1 决定 + 置信度
+    top_idx = probs.argmax().item()
+    top_source = model.config.id2label[str(top_idx)]
+    top_confidence = probs[top_idx].item()
+    is_real = top_source in REAL_LABELS
 
-    # Get top 3 predictions
-    top3_idx = probs.argsort(descending=True)[:3]
-    top3 = [
-        {"label": model.config.id2label[str(i.item())], "score": probs[i].item()}
-        for i in top3_idx
-    ]
+    if is_real:
+        human_prob = top_confidence
+        ai_prob = 1.0 - human_prob
+    else:
+        ai_prob = top_confidence
+        human_prob = 1.0 - ai_prob
+
+    # Get top 3 AI sources
+    ai_sources = []
+    for i, prob in enumerate(probs.tolist()):
+        label = model.config.id2label[str(i)]
+        if label not in REAL_LABELS:
+            ai_sources.append({"label": label, "score": round(prob, 3)})
+    ai_sources.sort(key=lambda x: x["score"], reverse=True)
+    top3_sources = ai_sources[:3]
 
     return {
-        "ai_probability": ai_prob,
-        "human_probability": human_prob,
-        "top3_sources": top3
+        "ai_probability": round(ai_prob, 3),
+        "human_probability": round(human_prob, 3),
+        "predicted_source": top_source,
+        "top3_sources": top3_sources
     }
 
 # Example
 result = detect_image("test.jpg")
 print(f"AI Probability: {result['ai_probability']:.1%}")
 print(f"Human Probability: {result['human_probability']:.1%}")
-print(f"Top 3 Sources: {result['top3_sources']}")
+print(f"Predicted Source: {result['predicted_source']}")
 ```
 
 **Example Output:**
 ```json
 {
-  "ai_probability": 0.877,
-  "human_probability": 0.123,
+  "ai_probability": 0.452,
+  "human_probability": 0.548,
+  "predicted_source": "stable_diffusion",
   "top3_sources": [
     {"label": "stable_diffusion", "score": 0.452},
     {"label": "latent_diffusion", "score": 0.213},
@@ -283,14 +292,21 @@ for i, (name, prob) in enumerate(zip(source_names, probs[0].tolist())):
 ### Calculate Real vs Fake Probability
 
 ```python
-# Aggregate real vs fake probabilities
-real_prob = sum(
-    probs[0][i].item()
-    for i, name in enumerate(source_names)
-    if source_is_real.get(name, False)
-)
-fake_prob = 1.0 - real_prob
+# Top-1 决定 + 置信度
+top_idx = probs[0].argmax().item()
+top_source = source_names[top_idx]
+top_confidence = probs[0][top_idx].item()
+is_real = source_is_real.get(top_source, False)
 
+if is_real:
+    real_prob = top_confidence
+    fake_prob = 1.0 - real_prob
+else:
+    fake_prob = top_confidence
+    real_prob = 1.0 - fake_prob
+
+print(f"Predicted Source: {top_source}")
+print(f"Is Real: {'Yes' if is_real else 'No (AI Generated)'}")
 print(f"Real: {real_prob:.2%}")
 print(f"AI Generated: {fake_prob:.2%}")
 ```

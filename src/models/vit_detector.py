@@ -264,18 +264,20 @@ class ViTDetector(nn.Module):
         image: Image.Image,
     ) -> Tuple[float, float]:
         """
-        聚合计算 real vs fake 总概率
+        Top-1 决定 + 置信度计算 real vs fake 概率
 
         Returns:
             (real_prob, fake_prob) 元组
         """
         result = self.predict_multiclass(image)
 
-        real_prob = sum(
-            prob for name, prob in result.all_probs.items()
-            if self.source_is_real.get(name, False)
-        )
-        fake_prob = 1.0 - real_prob
+        # Top-1 决定
+        if result.is_real:
+            real_prob = result.confidence
+            fake_prob = 1.0 - real_prob
+        else:
+            fake_prob = result.confidence
+            real_prob = 1.0 - fake_prob
 
         return real_prob, fake_prob
     

@@ -48,19 +48,19 @@ def predict(image: Image.Image):
         outputs = model(**inputs)
         probs = torch.softmax(outputs.logits, dim=-1)[0]
 
-    # Get prediction
+    # Top-1 决定 + 置信度
     pred_idx = probs.argmax().item()
     predicted_source = source_names[pred_idx]
     confidence = probs[pred_idx].item()
     is_real = source_is_real.get(predicted_source, False)
 
-    # Calculate aggregate real vs fake (human_probability vs ai_probability)
-    human_prob = sum(
-        probs[i].item()
-        for i, name in enumerate(source_names)
-        if source_is_real.get(name, False)
-    )
-    ai_prob = 1.0 - human_prob
+    # 根据 top-1 预测计算概率
+    if is_real:
+        human_prob = confidence
+        ai_prob = 1.0 - human_prob
+    else:
+        ai_prob = confidence
+        human_prob = 1.0 - ai_prob
 
     # Get top 3 AI sources only (exclude real sources)
     ai_sources = []
@@ -76,6 +76,7 @@ def predict(image: Image.Image):
     api_output = {
         "ai_probability": round(ai_prob, 3),
         "human_probability": round(human_prob, 3),
+        "predicted_source": predicted_source,
         "top3_sources": top3_sources
     }
 
