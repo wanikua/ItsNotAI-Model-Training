@@ -5,14 +5,14 @@ Update the README.md on the Hugging Face model repository
 Usage:
     python update_model_readme.py
 
-This will upload the README.md to boluobobo/ItsNotAI-v1-multiclass
+This will upload the README.md to boluobobo/ItsNotAI-ai-detector-v1
 """
 
 from huggingface_hub import HfApi
 from pathlib import Path
 
 
-def update_readme(model_id: str = "boluobobo/ItsNotAI-v1-multiclass", token: str = None):
+def update_readme(model_id: str = "boluobobo/ItsNotAI-ai-detector-v1", token: str = None):
     """Update the model README"""
 
     api = HfApi(token=token)
@@ -40,7 +40,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model-id", default="boluobobo/ItsNotAI-v1-multiclass")
+    parser.add_argument("--model-id", default="boluobobo/ItsNotAI-ai-detector-v1")
     parser.add_argument("--token", default=None, help="HF token")
     args = parser.parse_args()
 

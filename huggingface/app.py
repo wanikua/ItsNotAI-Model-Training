@@ -11,7 +11,7 @@ from transformers import AutoModelForImageClassification, AutoImageProcessor
 from huggingface_hub import hf_hub_download
 
 # Model configuration
-MODEL_ID = "boluobobo/ItsNotAI-v1-multiclass"
+MODEL_ID = "boluobobo/ItsNotAI-ai-detector-v1"
 
 # Load model and processor
 print("Loading model...")
@@ -185,7 +185,7 @@ with gr.Blocks(css=css, title="ItsNotAI - AI Image Detector") as demo:
         This model is based on **BEiT-Large** fine-tuned on the ArtiFact dataset.
 
         - **Accuracy**: 93.51%
-        - **Model**: [boluobobo/ItsNotAI-v1-multiclass](https://huggingface.co/boluobobo/ItsNotAI-v1-multiclass)
+        - **Model**: [boluobobo/ItsNotAI-ai-detector-v1](https://huggingface.co/boluobobo/ItsNotAI-ai-detector-v1)
 
         ### Disclaimer
 

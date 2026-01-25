@@ -30,7 +30,7 @@ metrics:
 - recall
 base_model: microsoft/beit-large-patch16-224
 model-index:
-- name: ItsNotAI-v1-multiclass
+- name: ItsNotAI-ai-detector-v1
   results:
   - task:
       type: image-classification
@@ -58,6 +58,8 @@ A state-of-the-art Vision Transformer model that detects AI-generated images wit
 
 **Website**: [https://itsnotai.org](https://itsnotai.org)
 
+> **Note**: This is one of the models used by ItsNotAI. For official verification at [itsnotai.org](https://itsnotai.org), we use an ensemble of multiple models combined with human expert review to ensure maximum accuracy.
+
 ---
 
 ## Demo: See It In Action
@@ -81,6 +83,15 @@ Most AI detectors focus on catching AI usage. **ItsNotAI takes the opposite appr
 - **Industry-Focused**: We specialize in digital painting, manga illustration, and texture design, developed in deep collaboration with 100+ professional artists.
 
 - **Artist-First**: Our industry endorsements and artist partnerships create a trust network that goes beyond pure technical metrics.
+
+## Use Cases
+
+- **Artists & Creators**: Prove your artwork is human-made, protect your reputation
+- **Stock Photo Platforms**: Filter AI-generated uploads, maintain content quality
+- **Social Media Moderation**: Detect AI-generated profile pictures and fake content
+- **News & Media**: Verify photo authenticity, combat misinformation
+- **NFT Marketplaces**: Ensure digital art authenticity
+- **Academic Research**: Study AI image generation patterns
 
 ## Model Description
 
@@ -125,7 +136,7 @@ from PIL import Image
 import torch
 
 # Load model
-model_id = "boluobobo/ItsNotAI-v1-multiclass"
+model_id = "boluobobo/ItsNotAI-ai-detector-v1"
 model = AutoModelForImageClassification.from_pretrained(model_id)
 processor = AutoImageProcessor.from_pretrained(model_id)
 
@@ -200,6 +211,20 @@ print(f"AI Generated: {fake_prob:.2%}")
 - **Loss**: Focal Loss with label smoothing (0.1)
 - **Hardware**: NVIDIA T4 / A100 GPU
 
+## FAQ
+
+**Q: Can this detect Midjourney images?**
+A: Yes, the model can detect images from Midjourney, Stable Diffusion, DALL-E, and 25+ other AI generators.
+
+**Q: Does it work on digital paintings?**
+A: Yes! We specialize in digital art, manga, and illustration detection with input from 100+ professional artists.
+
+**Q: How is this different from other AI detectors?**
+A: ItsNotAI focuses on helping artists prove their work is human-made, not just catching AI usage. We provide verifiable labels for authentic artwork.
+
+**Q: What image formats are supported?**
+A: PNG, JPG, WEBP, and other common formats. Images are automatically resized to 224x224 for processing.
+
 ## Limitations
 
 - Best performance on 224x224 or larger images
@@ -214,7 +239,7 @@ print(f"AI Generated: {fake_prob:.2%}")
   title={ItsNotAI: Multi-class AI Image Detection},
   author={ItsNotAI Team},
   year={2025},
-  url={https://huggingface.co/boluobobo/ItsNotAI-v1-multiclass}
+  url={https://huggingface.co/boluobobo/ItsNotAI-ai-detector-v1}
 }
 ```
 

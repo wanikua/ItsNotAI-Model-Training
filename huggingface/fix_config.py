@@ -6,7 +6,7 @@ Fix model config.json to include id2label mapping
 import json
 from huggingface_hub import hf_hub_download, HfApi
 
-MODEL_ID = "boluobobo/ItsNotAI-v1-multiclass"
+MODEL_ID = "boluobobo/ItsNotAI-ai-detector-v1"
 
 
 def fix_config(token: str = None):

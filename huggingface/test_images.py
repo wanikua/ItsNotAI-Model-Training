@@ -9,7 +9,7 @@ from transformers import AutoModelForImageClassification, AutoImageProcessor
 import json
 from huggingface_hub import hf_hub_download
 
-MODEL_ID = "boluobobo/ItsNotAI-v1-multiclass"
+MODEL_ID = "boluobobo/ItsNotAI-ai-detector-v1"
 
 # Load model
 print("Loading model...")
