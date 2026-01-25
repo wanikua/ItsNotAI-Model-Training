@@ -92,8 +92,6 @@ def predict(image: Image.Image):
 
     # Summary
     summary = f"""
-## Detection Result
-
 **Verdict**: {"Real Image" if is_real else "AI Generated"}
 
 **Predicted Source**: {predicted_source}
