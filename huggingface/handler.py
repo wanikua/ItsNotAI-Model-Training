@@ -5,9 +5,9 @@ Custom handler for Hugging Face Inference API
 
 import torch
 import json
+import base64
 from PIL import Image
 from transformers import AutoModelForImageClassification, AutoImageProcessor
-from huggingface_hub import hf_hub_download
 from io import BytesIO
 
 
@@ -20,18 +20,15 @@ class EndpointHandler:
 
         # Load source metadata
         try:
-            meta_path = hf_hub_download(repo_id=path, filename="source_meta.json", local_files_only=True)
-        except:
-            meta_path = f"{path}/source_meta.json"
-
-        try:
+            import os
+            meta_path = os.path.join(path, "source_meta.json")
             with open(meta_path) as f:
                 meta = json.load(f)
             self.source_names = meta["source_names"]
             self.source_is_real = meta["source_is_real"]
         except Exception:
-            # Fallback
-            self.source_names = list(self.model.config.id2label.values())
+            # Fallback - use model config
+            self.source_names = [self.model.config.id2label[i] for i in range(len(self.model.config.id2label))]
             self.source_is_real = {
                 "afhq": True, "celebahq": True, "coco": True, "ffhq": True,
                 "imagenet": True, "landscape": True, "lsun": True, "metfaces": True
@@ -39,19 +36,14 @@ class EndpointHandler:
 
     def __call__(self, data):
         """Process inference request"""
-        # Handle input
+        # Handle different input formats
         if isinstance(data, dict):
-            image_data = data.get("inputs") or data.get("image")
+            image_data = data.get("inputs") or data.get("image") or data.get("data")
         else:
             image_data = data
 
-        # Load image
-        if isinstance(image_data, bytes):
-            image = Image.open(BytesIO(image_data)).convert("RGB")
-        elif isinstance(image_data, Image.Image):
-            image = image_data.convert("RGB")
-        else:
-            image = Image.open(BytesIO(image_data)).convert("RGB")
+        # Convert to PIL Image
+        image = self._load_image(image_data)
 
         # Inference
         inputs = self.processor(image, return_tensors="pt")
@@ -81,3 +73,30 @@ class EndpointHandler:
             "human_probability": round(human_prob, 3),
             "top3_sources": top3_sources
         }
+
+    def _load_image(self, image_data):
+        """Load image from various formats"""
+        # Already a PIL Image
+        if isinstance(image_data, Image.Image):
+            return image_data.convert("RGB")
+
+        # Bytes
+        if isinstance(image_data, bytes):
+            return Image.open(BytesIO(image_data)).convert("RGB")
+
+        # Base64 encoded string
+        if isinstance(image_data, str):
+            # Remove data URL prefix if present
+            if "base64," in image_data:
+                image_data = image_data.split("base64,")[1]
+
+            # Decode base64
+            image_bytes = base64.b64decode(image_data)
+            return Image.open(BytesIO(image_bytes)).convert("RGB")
+
+        # List (could be from JSON)
+        if isinstance(image_data, list):
+            # Assume it's a nested structure, try first element
+            return self._load_image(image_data[0])
+
+        raise ValueError(f"Unsupported image format: {type(image_data)}")
