@@ -105,11 +105,76 @@ This model can:
 - **Input Size**: 224x224 pixels
 - **Mode**: Multi-class classification
 
-### Supported Sources (33 Classes)
+### Output Labels (33 Classes)
 
-**Real (8 classes)**: afhq, celebahq, coco, ffhq, imagenet, landscape, lsun, metfaces
+| Type | Labels |
+|------|--------|
+| **Real (8)** | `afhq`, `celebahq`, `coco`, `ffhq`, `imagenet`, `landscape`, `lsun`, `metfaces` |
+| **AI (25)** | `big_gan`, `cips`, `cycle_gan`, `ddpm`, `denoising_diffusion_gan`, `diffusion_gan`, `face_synthetics`, `gansformer`, `gau_gan`, `generative_inpainting`, `glide`, `lama`, `latent_diffusion`, `mat`, `palette`, `pro_gan`, `projected_gan`, `sfhq`, `stable_diffusion`, `star_gan`, `stylegan1`, `stylegan2`, `stylegan3`, `taming_transformer`, `vq_diffusion` |
 
-**AI (25 classes)**: big_gan, cips, cycle_gan, ddpm, denoising_diffusion_gan, diffusion_gan, face_synthetics, gansformer, gau_gan, generative_inpainting, glide, lama, latent_diffusion, mat, palette, pro_gan, projected_gan, sfhq, stable_diffusion, star_gan, stylegan1, stylegan2, stylegan3, taming_transformer, vq_diffusion
+### Recommended Usage
+
+```python
+from transformers import AutoModelForImageClassification, AutoImageProcessor
+from PIL import Image
+import torch
+
+# Load model
+model_id = "boluobobo/ItsNotAI-ai-detector-v1"
+model = AutoModelForImageClassification.from_pretrained(model_id)
+processor = AutoImageProcessor.from_pretrained(model_id)
+
+# Real source labels
+REAL_LABELS = {"afhq", "celebahq", "coco", "ffhq", "imagenet", "landscape", "lsun", "metfaces"}
+
+def detect_image(image_path):
+    image = Image.open(image_path).convert("RGB")
+    inputs = processor(image, return_tensors="pt")
+
+    with torch.no_grad():
+        outputs = model(**inputs)
+        probs = torch.softmax(outputs.logits, dim=-1)[0]
+
+    # Aggregate human vs AI probability
+    human_prob = sum(
+        probs[int(i)].item()
+        for i, label in model.config.id2label.items()
+        if label in REAL_LABELS
+    )
+    ai_prob = 1.0 - human_prob
+
+    # Get top 3 predictions
+    top3_idx = probs.argsort(descending=True)[:3]
+    top3 = [
+        {"label": model.config.id2label[str(i.item())], "score": probs[i].item()}
+        for i in top3_idx
+    ]
+
+    return {
+        "ai_probability": ai_prob,
+        "human_probability": human_prob,
+        "top3_sources": top3
+    }
+
+# Example
+result = detect_image("test.jpg")
+print(f"AI Probability: {result['ai_probability']:.1%}")
+print(f"Human Probability: {result['human_probability']:.1%}")
+print(f"Top 3 Sources: {result['top3_sources']}")
+```
+
+**Example Output:**
+```json
+{
+  "ai_probability": 0.877,
+  "human_probability": 0.123,
+  "top3_sources": [
+    {"label": "stable_diffusion", "score": 0.452},
+    {"label": "latent_diffusion", "score": 0.213},
+    {"label": "glide", "score": 0.089}
+  ]
+}
+```
 
 ## Performance
 
