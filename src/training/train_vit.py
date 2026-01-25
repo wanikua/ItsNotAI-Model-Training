@@ -144,6 +144,15 @@ class Trainer:
             binary_class_weights=getattr(config, 'binary_class_weights', None),
         )
 
+        # 加载预训练模型权重 (从已有 v1 模型继续训练)
+        pretrained_path = getattr(config, 'pretrained_model_path', None)
+        if pretrained_path:
+            self._load_pretrained_weights(pretrained_path)
+
+            # 可选: 冻结预训练 backbone
+            if getattr(config, 'freeze_pretrained_backbone', False):
+                self._freeze_backbone()
+
         # 构建 source_idx -> binary_label 映射 (双头模式)
         if self.dual_head:
             self.source_to_binary = {}
@@ -193,12 +202,57 @@ class Trainer:
         """设置随机种子"""
         import random
         import numpy as np
-        
+
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
+
+    def _load_pretrained_weights(self, pretrained_path: str):
+        """从已有模型加载权重 (支持 HF Hub ID 或本地路径)"""
+        print(f"\n{'='*60}")
+        print(f"Loading pretrained weights from: {pretrained_path}")
+
+        try:
+            # 1. 加载预训练模型
+            pretrained_model = ViTDetector.load(pretrained_path)
+
+            # 2. 复制 backbone 权重
+            pretrained_state = pretrained_model.backbone.state_dict()
+            self.model.backbone.load_state_dict(pretrained_state, strict=False)
+            print("  ✅ Backbone weights loaded")
+
+            # 3. 如果预训练模型有 classifier 且 num_labels 匹配，也加载
+            if hasattr(pretrained_model, 'classifier'):
+                pretrained_classifier_state = pretrained_model.classifier.state_dict()
+                try:
+                    self.model.classifier.load_state_dict(pretrained_classifier_state, strict=False)
+                    print("  ✅ Classifier weights loaded")
+                except Exception as e:
+                    print(f"  ⚠️ Classifier weights shape mismatch (expected, will train from scratch): {e}")
+
+            # 4. 二分类头从零开始训练 (因为 v1 没有)
+            if self.dual_head:
+                print("  ℹ️ Binary head will be trained from scratch")
+
+            print(f"{'='*60}\n")
+
+        except Exception as e:
+            print(f"  ❌ Failed to load pretrained weights: {e}")
+            print(f"  ℹ️ Continuing with randomly initialized weights")
+            print(f"{'='*60}\n")
+
+    def _freeze_backbone(self):
+        """冻结 backbone 权重 (只训练 classifier/binary_head)"""
+        print("  Freezing backbone weights...")
+        for param in self.model.backbone.parameters():
+            param.requires_grad = False
+
+        # 统计可训练参数
+        trainable = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        total = sum(p.numel() for p in self.model.parameters())
+        print(f"  Trainable parameters: {trainable:,} / {total:,} ({100*trainable/total:.1f}%)")
             
     def _create_optimizer(self) -> torch.optim.Optimizer:
         """创建优化器"""
@@ -672,6 +726,12 @@ def main():
     parser.add_argument("--push-to-hub", action="store_true", help="Push model to HF Hub")
     parser.add_argument("--hub-model-id", type=str, default=None, help="Repository ID (e.g., username/model-name)")
     parser.add_argument("--hub-token", type=str, default=None, help="HF API Token")
+
+    # 预训练模型 (迁移学习)
+    parser.add_argument("--pretrained-model", type=str, default=None,
+                        help="Load pretrained model from HF Hub ID or local path (e.g., boluobobo/ItsNotAI-ai-detector-v1)")
+    parser.add_argument("--freeze-pretrained", action="store_true",
+                        help="Freeze pretrained backbone, only train classifier/binary_head")
     
     args = parser.parse_args()
 
@@ -720,6 +780,12 @@ def main():
         config.push_to_hub = True
         config.hub_model_id = args.hub_model_id
         config.hub_token = args.hub_token
+
+    # 预训练模型 config
+    if args.pretrained_model:
+        config.pretrained_model_path = args.pretrained_model
+    if args.freeze_pretrained:
+        config.freeze_pretrained_backbone = True
 
     # 开始训练
     trainer = Trainer(config)

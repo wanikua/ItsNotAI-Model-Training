@@ -152,11 +152,28 @@ class ViTDetector(nn.Module):
         self.model.to(self.device)
         self.labels = self.source_names  # 兼容旧接口
 
+        # 缓存 backbone 引用 (用于迁移学习)
+        self._backbone = None
+        for name, module in self.model.named_children():
+            if name not in ["classifier", "head", "fc"]:
+                self._backbone = module
+                break
+
         print(f"ViTDetector initialized on {self.device}")
         print(f"  Mode: {'Dual-head' if dual_head else ('Multi-class (' + str(num_labels) + ' sources)' if self.multiclass else 'Binary')}")
         print(f"  Parameters: {sum(p.numel() for p in self.parameters()):,}")
         print(f"  Trainable: {sum(p.numel() for p in self.parameters() if p.requires_grad):,}")
-    
+
+    @property
+    def backbone(self):
+        """返回 backbone 模块 (用于迁移学习)"""
+        return self._backbone
+
+    @property
+    def classifier(self):
+        """返回 classifier 模块"""
+        return self.model.classifier
+
     def _get_backbone_features(self, pixel_values: torch.Tensor) -> torch.Tensor:
         """
         提取 backbone 特征 (CLS token)
@@ -472,7 +489,7 @@ class ViTDetector(nn.Module):
 
     @classmethod
     def load(cls, model_path: str, **kwargs) -> "ViTDetector":
-        """加载保存的模型"""
+        """加载保存的模型 (支持本地路径或 HF Hub ID)"""
         import json
         import os
 
@@ -484,11 +501,27 @@ class ViTDetector(nn.Module):
         instance.processor = AutoImageProcessor.from_pretrained(model_path)
         instance.model.to(instance.device)
 
+        # 判断是否为 HF Hub ID (包含 /)
+        is_hub_id = "/" in model_path and not os.path.exists(model_path)
+
         # 加载来源信息
-        meta_path = os.path.join(model_path, "source_meta.json")
-        if os.path.exists(meta_path):
-            with open(meta_path, "r") as f:
-                meta = json.load(f)
+        meta = None
+        if is_hub_id:
+            # 从 HF Hub 下载 metadata
+            try:
+                from huggingface_hub import hf_hub_download
+                meta_path = hf_hub_download(repo_id=model_path, filename="source_meta.json")
+                with open(meta_path, "r") as f:
+                    meta = json.load(f)
+            except Exception:
+                pass  # 文件不存在
+        else:
+            meta_path = os.path.join(model_path, "source_meta.json")
+            if os.path.exists(meta_path):
+                with open(meta_path, "r") as f:
+                    meta = json.load(f)
+
+        if meta:
             instance.source_names = meta.get("source_names", ["real", "fake"])
             instance.source_is_real = meta.get("source_is_real", {"real": True})
             instance.num_labels = meta.get("num_labels", 2)
@@ -506,18 +539,36 @@ class ViTDetector(nn.Module):
 
         # 加载二分类头 (双头模式)
         if instance.dual_head:
-            binary_head_path = os.path.join(model_path, "binary_head.pt")
-            if os.path.exists(binary_head_path):
+            binary_head_path = None
+            if is_hub_id:
+                try:
+                    from huggingface_hub import hf_hub_download
+                    binary_head_path = hf_hub_download(repo_id=model_path, filename="binary_head.pt")
+                except Exception:
+                    pass
+            else:
+                local_path = os.path.join(model_path, "binary_head.pt")
+                if os.path.exists(local_path):
+                    binary_head_path = local_path
+
+            if binary_head_path:
                 instance.binary_head = nn.Sequential(
                     nn.Dropout(0.1),
                     nn.Linear(instance.hidden_size, 2),
                 )
                 instance.binary_head.load_state_dict(torch.load(binary_head_path, map_location=instance.device))
                 instance.binary_head.to(instance.device)
-                print(f"  Binary head loaded from {binary_head_path}")
+                print(f"  Binary head loaded")
             else:
                 print(f"  Warning: dual_head=True but binary_head.pt not found")
                 instance.dual_head = False
+
+        # 缓存 backbone 引用 (用于迁移学习)
+        instance._backbone = None
+        for name, module in instance.model.named_children():
+            if name not in ["classifier", "head", "fc"]:
+                instance._backbone = module
+                break
 
         instance.labels = instance.source_names
 

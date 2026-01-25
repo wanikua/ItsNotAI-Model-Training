@@ -20,7 +20,11 @@ class TrainingConfig:
     freeze_backbone: bool = False
     dropout: float = 0.1
     drop_path_rate: float = 0.1  # Stochastic Depth for large models
-    
+
+    # 预训练模型 (从已有模型继续训练)
+    pretrained_model_path: Optional[str] = None  # HF Hub ID 或本地路径, e.g. "boluobobo/ItsNotAI-ai-detector-v1"
+    freeze_pretrained_backbone: bool = False  # 是否冻结预训练 backbone (只训练新的 binary head)
+
     # 数据配置
     data_root: Optional[Path] = None
     img_size: int = 224
@@ -34,6 +38,11 @@ class TrainingConfig:
     # 二分类 loss 权重 (提升真实照片识别率)
     # real_weight > 1.0 会让模型更倾向于预测为真实
     binary_class_weights: Optional[List[float]] = None  # [real_weight, ai_weight], e.g. [1.5, 1.0]
+
+    # 双头 loss 权重平衡
+    # 控制多分类和二分类 loss 的权重比例
+    multiclass_loss_weight: float = 1.0  # 多分类 loss 权重
+    binary_loss_weight: float = 1.0      # 二分类 loss 权重
     
     # 训练配置
     batch_size: int = 32  # Large model 需要更小 batch 或更多显存
@@ -172,8 +181,39 @@ class TrainingConfig:
             binary_class_weights=[1.5, 1.0],  # 提升真实照片识别率
         )
 
+    @classmethod
+    def for_finetune_v1(cls) -> "TrainingConfig":
+        """从 v1 模型微调 (添加双头)"""
+        return cls(
+            pretrained_model_path="boluobobo/ItsNotAI-ai-detector-v1",
+            multiclass=True,
+            dual_head=True,
+            balance_classes=False,
+            num_epochs=5,  # 微调不需要太多 epochs
+            learning_rate=1e-5,  # 微调用更小的学习率
+            binary_class_weights=[1.5, 1.0],
+        )
 
-@dataclass  
+    @classmethod
+    def for_colab_finetune_v1(cls) -> "TrainingConfig":
+        """Colab A100 从 v1 模型微调"""
+        return cls(
+            pretrained_model_path="boluobobo/ItsNotAI-ai-detector-v1",
+            multiclass=True,
+            dual_head=True,
+            balance_classes=False,
+            batch_size=64,
+            use_amp=True,
+            num_workers=2,
+            num_epochs=5,
+            learning_rate=1e-5,
+            data_root=Path('/content/data'),
+            output_dir=Path('/content/outputs'),
+            binary_class_weights=[1.5, 1.0],
+        )
+
+
+@dataclass
 class EvalConfig:
     """评估配置"""
     
