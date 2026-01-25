@@ -81,18 +81,25 @@ class FocalLoss(nn.Module):
 
 
 class Trainer:
-    """ViT 训练器 - 支持二分类和多分类模式"""
+    """ViT 训练器 - 支持二分类、多分类和双头模式"""
 
     def __init__(self, config: TrainingConfig):
         self.config = config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.multiclass = getattr(config, 'multiclass', False)
+        self.dual_head = getattr(config, 'dual_head', False)
 
         print(f"\n{'='*60}")
         print(f"🚀 ViT AI Image Detector Trainer")
         print(f"{'='*60}")
         print(f"Device: {self.device}")
-        print(f"Mode: {'Multi-class (Source Detection)' if self.multiclass else 'Binary (Real/Fake)'}")
+        if self.dual_head:
+            mode_str = "Dual-head (Multi-class + Binary)"
+        elif self.multiclass:
+            mode_str = "Multi-class (Source Detection)"
+        else:
+            mode_str = "Binary (Real/Fake)"
+        print(f"Mode: {mode_str}")
         if torch.cuda.is_available():
             print(f"GPU: {torch.cuda.get_device_name(0)}")
             print(f"Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
@@ -132,7 +139,18 @@ class Trainer:
             drop_path_rate=config.drop_path_rate,
             source_names=self.source_names if self.multiclass else None,
             source_is_real=self.source_is_real if self.multiclass else None,
+            dual_head=self.dual_head,
         )
+
+        # 构建 source_idx -> binary_label 映射 (双头模式)
+        if self.dual_head:
+            self.source_to_binary = {}
+            for idx, name in enumerate(self.source_names):
+                # Real=0, AI=1
+                is_real = self.source_is_real.get(name, False)
+                self.source_to_binary[idx] = 0 if is_real else 1
+            print(f"  Binary mapping: {sum(1 for v in self.source_to_binary.values() if v == 0)} real, "
+                  f"{sum(1 for v in self.source_to_binary.values() if v == 1)} AI sources")
         
         # 优化器
         self.optimizer = self._create_optimizer()
@@ -253,93 +271,131 @@ class Trainer:
             try: wandb.log(metrics, step=step)
             except: pass
     
+    def _get_binary_labels(self, labels: torch.Tensor) -> torch.Tensor:
+        """将多分类标签转换为二分类标签 (Real=0, AI=1)"""
+        binary_labels = torch.tensor(
+            [self.source_to_binary[l.item()] for l in labels],
+            dtype=torch.long,
+            device=labels.device
+        )
+        return binary_labels
+
     def train_epoch(self, epoch: int) -> Dict[str, float]:
         """训练一个 epoch"""
         self.model.train()
-        
+
         total_loss = 0.0
         all_preds = []
         all_labels = []
-        
+        # 双头模式额外统计
+        all_binary_preds = []
+        all_binary_labels = []
+
         pbar = tqdm(
-            self.train_loader, 
+            self.train_loader,
             desc=f"Epoch {epoch+1}/{self.config.num_epochs}",
             leave=True,
         )
-        
+
         for batch_idx, (images, labels) in enumerate(pbar):
             images = images.to(self.device)
             labels = labels.to(self.device)
-            
+
+            # 双头模式：生成二分类标签
+            binary_labels = None
+            if self.dual_head:
+                binary_labels = self._get_binary_labels(labels)
+
             # 前向传播 (混合精度)
             if self.config.use_amp:
                 with autocast():
-                    # ⚠️ 不传 labels 给 model，自己算 loss
-                    outputs = self.model(images)
-                    loss = self.criterion(outputs["logits"], labels)
-                
+                    if self.dual_head:
+                        # 双头模式：模型内部计算双 loss
+                        outputs = self.model(images, labels=labels, binary_labels=binary_labels)
+                        loss = outputs["loss"]
+                    else:
+                        outputs = self.model(images)
+                        loss = self.criterion(outputs["logits"], labels)
+
                 # 反向传播
                 self.scaler.scale(loss).backward()
-                
+
                 if (batch_idx + 1) % self.config.gradient_accumulation_steps == 0:
                     self.scaler.unscale_(self.optimizer)
                     torch.nn.utils.clip_grad_norm_(
-                        self.model.parameters(), 
+                        self.model.parameters(),
                         self.config.max_grad_norm
                     )
                     self.scaler.step(self.optimizer)
                     self.scaler.update()
                     self.optimizer.zero_grad()
-                    
+
                     if self.scheduler:
                         self.scheduler.step()
             else:
-                outputs = self.model(images)
-                loss = self.criterion(outputs["logits"], labels)
-                
+                if self.dual_head:
+                    outputs = self.model(images, labels=labels, binary_labels=binary_labels)
+                    loss = outputs["loss"]
+                else:
+                    outputs = self.model(images)
+                    loss = self.criterion(outputs["logits"], labels)
+
                 loss.backward()
-                
+
                 if (batch_idx + 1) % self.config.gradient_accumulation_steps == 0:
                     torch.nn.utils.clip_grad_norm_(
-                        self.model.parameters(), 
+                        self.model.parameters(),
                         self.config.max_grad_norm
                     )
                     self.optimizer.step()
                     self.optimizer.zero_grad()
-                    
+
                     if self.scheduler:
                         self.scheduler.step()
-            
+
             # 收集统计
             total_loss += loss.item()
             preds = outputs["logits"].argmax(-1).cpu().tolist()
             all_preds.extend(preds)
             all_labels.extend(labels.cpu().tolist())
+
+            # 双头模式：收集二分类统计
+            if self.dual_head:
+                binary_preds = outputs["binary_logits"].argmax(-1).cpu().tolist()
+                all_binary_preds.extend(binary_preds)
+                all_binary_labels.extend(binary_labels.cpu().tolist())
             
             # 更新进度条
-            pbar.set_postfix({
+            postfix = {
                 "loss": f"{loss.item():.4f}",
                 "acc": f"{accuracy_score(all_labels, all_preds):.3f}",
-            })
-            
+            }
+            if self.dual_head and all_binary_preds:
+                postfix["bin_acc"] = f"{accuracy_score(all_binary_labels, all_binary_preds):.3f}"
+            pbar.set_postfix(postfix)
+
             self.global_step += 1
-            
+
             # 定期记录
             if self.global_step % self.config.log_every_n_steps == 0:
-                self._log_metrics({
+                log_dict = {
                     "train/loss": loss.item(),
                     "train/lr": self.optimizer.param_groups[0]["lr"],
-                }, self.global_step)
-            
+                }
+                if self.dual_head and "multiclass_loss" in outputs:
+                    log_dict["train/multiclass_loss"] = outputs["multiclass_loss"].item()
+                    log_dict["train/binary_loss"] = outputs["binary_loss"].item()
+                self._log_metrics(log_dict, self.global_step)
+
             # 定期验证
             if self.global_step % self.config.eval_every_n_steps == 0:
                 val_metrics = self.evaluate()
                 self.model.train()
-                
+
                 self._log_metrics({
                     f"val/{k}": v for k, v in val_metrics.items()
                 }, self.global_step)
-        
+
         # Epoch 统计
         avg_mode = "weighted" if self.multiclass else "binary"
         metrics = {
@@ -349,6 +405,11 @@ class Trainer:
             "recall": recall_score(all_labels, all_preds, average=avg_mode, zero_division=0),
             "f1": f1_score(all_labels, all_preds, average=avg_mode, zero_division=0),
         }
+
+        # 双头模式：添加二分类指标
+        if self.dual_head and all_binary_preds:
+            metrics["binary_accuracy"] = accuracy_score(all_binary_labels, all_binary_preds)
+            metrics["binary_f1"] = f1_score(all_binary_labels, all_binary_preds, average="binary", zero_division=0)
 
         return metrics
     
@@ -365,12 +426,26 @@ class Trainer:
         all_probs = []
         total_loss = 0.0
 
+        # 双头模式额外统计
+        all_binary_preds = []
+        all_binary_labels = []
+        all_binary_probs = []
+
         for images, labels in tqdm(loader, desc="Evaluating", leave=False):
             images = images.to(self.device)
             labels = labels.to(self.device)
 
-            outputs = self.model(images)
-            loss = self.criterion(outputs["logits"], labels)
+            # 双头模式：生成二分类标签
+            binary_labels = None
+            if self.dual_head:
+                binary_labels = self._get_binary_labels(labels)
+
+            if self.dual_head:
+                outputs = self.model(images, labels=labels, binary_labels=binary_labels)
+                loss = outputs["loss"]
+            else:
+                outputs = self.model(images)
+                loss = self.criterion(outputs["logits"], labels)
 
             total_loss += loss.item()
             preds = outputs["logits"].argmax(-1).cpu().tolist()
@@ -384,6 +459,13 @@ class Trainer:
 
             all_preds.extend(preds)
             all_labels.extend(labels.cpu().tolist())
+
+            # 双头模式：收集二分类统计
+            if self.dual_head:
+                binary_preds = outputs["binary_logits"].argmax(-1).cpu().tolist()
+                all_binary_preds.extend(binary_preds)
+                all_binary_labels.extend(binary_labels.cpu().tolist())
+                all_binary_probs.extend(outputs["binary_probs"][:, 1].cpu().tolist())  # P(AI)
 
         avg_mode = "weighted" if self.multiclass else "binary"
         metrics = {
@@ -405,6 +487,17 @@ class Trainer:
                 metrics["auc"] = roc_auc_score(all_labels, all_probs)
         except:
             metrics["auc"] = 0.0
+
+        # 双头模式：添加二分类指标
+        if self.dual_head and all_binary_preds:
+            metrics["binary_accuracy"] = accuracy_score(all_binary_labels, all_binary_preds)
+            metrics["binary_precision"] = precision_score(all_binary_labels, all_binary_preds, average="binary", zero_division=0)
+            metrics["binary_recall"] = recall_score(all_binary_labels, all_binary_preds, average="binary", zero_division=0)
+            metrics["binary_f1"] = f1_score(all_binary_labels, all_binary_preds, average="binary", zero_division=0)
+            try:
+                metrics["binary_auc"] = roc_auc_score(all_binary_labels, all_binary_probs)
+            except:
+                metrics["binary_auc"] = 0.0
 
         return metrics
     
@@ -565,23 +658,37 @@ def main():
     parser.add_argument("--output-dir", type=str, default="outputs")
     parser.add_argument("--experiment-name", type=str, default="vit-ai-detector")
     
+    # 模式参数
+    parser.add_argument("--multiclass", action="store_true", help="Multi-class mode (source detection)")
+    parser.add_argument("--dual-head", action="store_true", help="Dual-head mode (multiclass + binary)")
+
     # 调试参数
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--colab", action="store_true", help="Use Colab A100 optimized config")
-    
+
     # HF Hub 上传
     parser.add_argument("--push-to-hub", action="store_true", help="Push model to HF Hub")
     parser.add_argument("--hub-model-id", type=str, default=None, help="Repository ID (e.g., username/model-name)")
     parser.add_argument("--hub-token", type=str, default=None, help="HF API Token")
     
     args = parser.parse_args()
-    
-    # 创建配置
-    if args.colab or IN_COLAB:
+
+    # 创建配置 (根据模式选择)
+    if args.dual_head:
+        if args.colab or IN_COLAB:
+            config = TrainingConfig.for_colab_dual_head()
+        else:
+            config = TrainingConfig.for_dual_head()
+    elif args.multiclass:
+        if args.colab or IN_COLAB:
+            config = TrainingConfig.for_colab_multiclass()
+        else:
+            config = TrainingConfig.for_multiclass()
+    elif args.colab or IN_COLAB:
         config = TrainingConfig.for_colab_a100()
     else:
         config = TrainingConfig()
-    
+
     # 覆盖命令行参数
     if args.data_root:
         config.data_root = Path(args.data_root)
@@ -605,13 +712,13 @@ def main():
         config.experiment_name = args.experiment_name
     if args.dry_run:
         config.dry_run = True
-        
+
     # HF Hub config
     if args.push_to_hub:
         config.push_to_hub = True
         config.hub_model_id = args.hub_model_id
         config.hub_token = args.hub_token
-    
+
     # 开始训练
     trainer = Trainer(config)
     trainer.train()

@@ -61,6 +61,7 @@ class ViTDetector(nn.Module):
     模式:
     - 二分类 (num_labels=2): real (0) / fake (1)
     - 多分类 (num_labels>2): 识别具体生成器/来源
+    - 双头模式 (dual_head=True): 同时输出多分类和二分类结果
     """
 
     def __init__(
@@ -73,6 +74,7 @@ class ViTDetector(nn.Module):
         drop_path_rate: float = 0.0,
         source_names: Optional[List[str]] = None,  # 多分类时的来源名称列表
         source_is_real: Optional[Dict[str, bool]] = None,  # 每个来源是否为真实
+        dual_head: bool = False,  # 双头模式：多分类 + 二分类
     ):
         super().__init__()
 
@@ -83,6 +85,7 @@ class ViTDetector(nn.Module):
         self.num_labels = num_labels
         self.device = get_device()
         self.multiclass = num_labels > 2
+        self.dual_head = dual_head
 
         # 来源信息 (多分类模式)
         if source_names:
@@ -110,6 +113,9 @@ class ViTDetector(nn.Module):
         # 加载图像处理器
         self.processor = AutoImageProcessor.from_pretrained(model_name)
 
+        # 获取 hidden_size
+        self.hidden_size = self.model.config.hidden_size
+
         # 可选: 冻结 backbone
         if freeze_backbone:
             backbone = None
@@ -125,49 +131,142 @@ class ViTDetector(nn.Module):
             else:
                 print("Warning: Could not identify backbone to freeze")
 
-        # 添加 dropout
+        # 多分类头 (替换原有 classifier)
         if dropout > 0:
             self.model.classifier = nn.Sequential(
                 nn.Dropout(dropout),
-                nn.Linear(self.model.config.hidden_size, num_labels),
+                nn.Linear(self.hidden_size, num_labels),
             )
+
+        # 二分类头 (双头模式)
+        if self.dual_head:
+            self.binary_head = nn.Sequential(
+                nn.Dropout(dropout),
+                nn.Linear(self.hidden_size, 2),  # Real (0) / AI (1)
+            )
+            self.binary_head.to(self.device)
+            print(f"  Dual-head mode enabled: multiclass ({num_labels}) + binary (2)")
 
         self.model.to(self.device)
         self.labels = self.source_names  # 兼容旧接口
 
         print(f"ViTDetector initialized on {self.device}")
-        print(f"  Mode: {'Multi-class (' + str(num_labels) + ' sources)' if self.multiclass else 'Binary'}")
+        print(f"  Mode: {'Dual-head' if dual_head else ('Multi-class (' + str(num_labels) + ' sources)' if self.multiclass else 'Binary')}")
         print(f"  Parameters: {sum(p.numel() for p in self.parameters()):,}")
         print(f"  Trainable: {sum(p.numel() for p in self.parameters() if p.requires_grad):,}")
     
+    def _get_backbone_features(self, pixel_values: torch.Tensor) -> torch.Tensor:
+        """
+        提取 backbone 特征 (CLS token)
+
+        支持 BEiT, ViT, Swin 等不同架构
+        """
+        pixel_values = pixel_values.to(self.device)
+
+        # 获取 backbone (不同模型结构不同)
+        if hasattr(self.model, 'beit'):
+            # BEiT 模型
+            outputs = self.model.beit(pixel_values)
+            features = outputs.last_hidden_state[:, 0]  # CLS token
+        elif hasattr(self.model, 'vit'):
+            # ViT 模型
+            outputs = self.model.vit(pixel_values)
+            features = outputs.last_hidden_state[:, 0]
+        elif hasattr(self.model, 'swin'):
+            # Swin 模型
+            outputs = self.model.swin(pixel_values)
+            features = outputs.pooler_output
+        else:
+            # 通用方法：尝试获取 base_model
+            base_model = None
+            for name, module in self.model.named_children():
+                if name not in ["classifier", "head", "fc"]:
+                    base_model = module
+                    break
+
+            if base_model:
+                outputs = base_model(pixel_values)
+                if hasattr(outputs, 'pooler_output') and outputs.pooler_output is not None:
+                    features = outputs.pooler_output
+                else:
+                    features = outputs.last_hidden_state[:, 0]
+            else:
+                raise ValueError("Cannot extract backbone features from this model")
+
+        return features
+
     def forward(
-        self, 
+        self,
         pixel_values: torch.Tensor,
         labels: Optional[torch.Tensor] = None,
+        binary_labels: Optional[torch.Tensor] = None,  # 二分类标签 (双头模式)
     ) -> Dict[str, torch.Tensor]:
         """
         前向传播
-        
+
         Args:
             pixel_values: (B, C, H, W) 图像张量
-            labels: (B,) 可选标签用于计算损失
-        
+            labels: (B,) 多分类标签
+            binary_labels: (B,) 二分类标签 (0=Real, 1=AI)，双头模式使用
+
         Returns:
-            字典包含 logits, (loss if labels provided), probs
+            字典包含:
+            - logits: 多分类 logits
+            - probs: 多分类概率
+            - binary_logits: 二分类 logits (双头模式)
+            - binary_probs: 二分类概率 (双头模式)
+            - loss: 总损失 (如果提供标签)
         """
-        outputs = self.model(
-            pixel_values=pixel_values.to(self.device),
-            labels=labels.to(self.device) if labels is not None else None,
-        )
-        
-        result = {
-            "logits": outputs.logits,
-            "probs": torch.softmax(outputs.logits, dim=-1),
-        }
-        
-        if labels is not None:
-            result["loss"] = outputs.loss
-        
+        pixel_values = pixel_values.to(self.device)
+
+        if self.dual_head:
+            # 双头模式：提取共享特征，分别送入两个头
+            features = self._get_backbone_features(pixel_values)
+
+            # 多分类头
+            multiclass_logits = self.model.classifier(features)
+
+            # 二分类头
+            binary_logits = self.binary_head(features)
+
+            result = {
+                "logits": multiclass_logits,
+                "probs": torch.softmax(multiclass_logits, dim=-1),
+                "binary_logits": binary_logits,
+                "binary_probs": torch.softmax(binary_logits, dim=-1),
+            }
+
+            # 计算损失
+            if labels is not None or binary_labels is not None:
+                loss = 0.0
+                ce_loss = nn.CrossEntropyLoss()
+
+                if labels is not None:
+                    multiclass_loss = ce_loss(multiclass_logits, labels.to(self.device))
+                    result["multiclass_loss"] = multiclass_loss
+                    loss = loss + multiclass_loss
+
+                if binary_labels is not None:
+                    binary_loss = ce_loss(binary_logits, binary_labels.to(self.device))
+                    result["binary_loss"] = binary_loss
+                    loss = loss + binary_loss
+
+                result["loss"] = loss
+        else:
+            # 原有模式：只有多分类
+            outputs = self.model(
+                pixel_values=pixel_values,
+                labels=labels.to(self.device) if labels is not None else None,
+            )
+
+            result = {
+                "logits": outputs.logits,
+                "probs": torch.softmax(outputs.logits, dim=-1),
+            }
+
+            if labels is not None:
+                result["loss"] = outputs.loss
+
         return result
     
     def predict(
@@ -264,20 +363,41 @@ class ViTDetector(nn.Module):
         image: Image.Image,
     ) -> Tuple[float, float]:
         """
-        Top-1 决定 + 置信度计算 real vs fake 概率
+        获取 real vs fake 概率
+
+        双头模式: 使用二分类头的直接输出
+        普通模式: 使用 Top-1 决定 + 置信度计算
 
         Returns:
             (real_prob, fake_prob) 元组
         """
-        result = self.predict_multiclass(image)
+        self.eval()
 
-        # Top-1 决定
-        if result.is_real:
-            real_prob = result.confidence
-            fake_prob = 1.0 - real_prob
-        else:
-            fake_prob = result.confidence
-            real_prob = 1.0 - fake_prob
+        inputs = self.processor(image, return_tensors="pt")
+        pixel_values = inputs["pixel_values"].to(self.device)
+
+        with torch.no_grad():
+            outputs = self.forward(pixel_values)
+
+            if self.dual_head:
+                # 双头模式：直接使用二分类头输出
+                binary_probs = outputs["binary_probs"][0].cpu().tolist()
+                real_prob = binary_probs[0]  # index 0 = Real
+                fake_prob = binary_probs[1]  # index 1 = AI
+            else:
+                # 普通模式：Top-1 决定
+                probs = outputs["probs"][0].cpu().tolist()
+                pred_idx = outputs["logits"].argmax(-1).item()
+                predicted_source = self.source_names[pred_idx]
+                is_real = self.source_is_real.get(predicted_source, False)
+                confidence = probs[pred_idx]
+
+                if is_real:
+                    real_prob = confidence
+                    fake_prob = 1.0 - real_prob
+                else:
+                    fake_prob = confidence
+                    real_prob = 1.0 - fake_prob
 
         return real_prob, fake_prob
     
@@ -320,8 +440,15 @@ class ViTDetector(nn.Module):
         import json
         import os
 
+        os.makedirs(save_path, exist_ok=True)
+
         self.model.save_pretrained(save_path)
         self.processor.save_pretrained(save_path)
+
+        # 保存二分类头 (双头模式)
+        if self.dual_head:
+            binary_head_path = os.path.join(save_path, "binary_head.pt")
+            torch.save(self.binary_head.state_dict(), binary_head_path)
 
         # 保存来源信息
         meta = {
@@ -329,11 +456,15 @@ class ViTDetector(nn.Module):
             "source_is_real": self.source_is_real,
             "num_labels": self.num_labels,
             "multiclass": self.multiclass,
+            "dual_head": self.dual_head,
+            "hidden_size": self.hidden_size,
         }
         with open(os.path.join(save_path, "source_meta.json"), "w") as f:
             json.dump(meta, f, indent=2)
 
         print(f"Model saved to {save_path}")
+        if self.dual_head:
+            print(f"  Binary head saved to {binary_head_path}")
 
     @classmethod
     def load(cls, model_path: str, **kwargs) -> "ViTDetector":
@@ -358,17 +489,39 @@ class ViTDetector(nn.Module):
             instance.source_is_real = meta.get("source_is_real", {"real": True})
             instance.num_labels = meta.get("num_labels", 2)
             instance.multiclass = meta.get("multiclass", False)
+            instance.dual_head = meta.get("dual_head", False)
+            instance.hidden_size = meta.get("hidden_size", instance.model.config.hidden_size)
         else:
             # 兼容旧模型
             instance.source_names = ["real", "fake"]
             instance.source_is_real = {"real": True}
             instance.num_labels = 2
             instance.multiclass = False
+            instance.dual_head = False
+            instance.hidden_size = instance.model.config.hidden_size
+
+        # 加载二分类头 (双头模式)
+        if instance.dual_head:
+            binary_head_path = os.path.join(model_path, "binary_head.pt")
+            if os.path.exists(binary_head_path):
+                instance.binary_head = nn.Sequential(
+                    nn.Dropout(0.1),
+                    nn.Linear(instance.hidden_size, 2),
+                )
+                instance.binary_head.load_state_dict(torch.load(binary_head_path, map_location=instance.device))
+                instance.binary_head.to(instance.device)
+                print(f"  Binary head loaded from {binary_head_path}")
+            else:
+                print(f"  Warning: dual_head=True but binary_head.pt not found")
+                instance.dual_head = False
 
         instance.labels = instance.source_names
 
         print(f"Model loaded from {model_path}")
-        print(f"  Mode: {'Multi-class (' + str(instance.num_labels) + ' sources)' if instance.multiclass else 'Binary'}")
+        mode_str = "Dual-head" if instance.dual_head else (
+            f"Multi-class ({instance.num_labels} sources)" if instance.multiclass else "Binary"
+        )
+        print(f"  Mode: {mode_str}")
         return instance
 
 

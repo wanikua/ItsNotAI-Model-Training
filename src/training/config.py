@@ -28,6 +28,7 @@ class TrainingConfig:
     include_flux: bool = True
     balance_classes: bool = True
     multiclass: bool = False  # 多分类模式: 识别具体生成器
+    dual_head: bool = False   # 双头模式: 多分类 + 二分类
     
     # 训练配置
     batch_size: int = 32  # Large model 需要更小 batch 或更多显存
@@ -132,6 +133,33 @@ class TrainingConfig:
             use_amp=True,
             num_workers=2,
             num_epochs=15,
+            learning_rate=5e-6,
+            data_root=Path('/content/data'),
+            output_dir=Path('/content/outputs'),
+        )
+
+    @classmethod
+    def for_dual_head(cls) -> "TrainingConfig":
+        """双头模式配置 - 多分类 + 二分类"""
+        return cls(
+            multiclass=True,
+            dual_head=True,
+            balance_classes=False,
+            num_epochs=10,
+            learning_rate=5e-6,
+        )
+
+    @classmethod
+    def for_colab_dual_head(cls) -> "TrainingConfig":
+        """Colab A100 双头模式配置"""
+        return cls(
+            multiclass=True,
+            dual_head=True,
+            balance_classes=False,
+            batch_size=64,
+            use_amp=True,
+            num_workers=2,
+            num_epochs=10,
             learning_rate=5e-6,
             data_root=Path('/content/data'),
             output_dir=Path('/content/outputs'),

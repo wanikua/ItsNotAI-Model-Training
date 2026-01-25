@@ -1,10 +1,13 @@
 """
 ItsNotAI - AI Image Detector
 Gradio app for Hugging Face Spaces
+
+支持双头模型：多分类 + 二分类
 """
 
 import gradio as gr
 import torch
+import torch.nn as nn
 import json
 from PIL import Image
 from transformers import AutoModelForImageClassification, AutoImageProcessor
@@ -26,12 +29,54 @@ try:
         meta = json.load(f)
     source_names = meta["source_names"]
     source_is_real = meta["source_is_real"]
+    dual_head = meta.get("dual_head", False)
+    hidden_size = meta.get("hidden_size", model.config.hidden_size)
 except Exception:
     # Fallback
     source_names = list(model.config.id2label.values())
     source_is_real = {}
+    dual_head = False
+    hidden_size = model.config.hidden_size
 
-print(f"Loaded {len(source_names)} classes")
+# Load binary head if dual-head mode
+binary_head = None
+if dual_head:
+    try:
+        binary_head_path = hf_hub_download(repo_id=MODEL_ID, filename="binary_head.pt")
+        binary_head = nn.Sequential(
+            nn.Dropout(0.1),
+            nn.Linear(hidden_size, 2),
+        )
+        binary_head.load_state_dict(torch.load(binary_head_path, map_location="cpu"))
+        binary_head.eval()
+        print("Binary head loaded - using dual-head mode")
+    except Exception as e:
+        print(f"Binary head not found, falling back to single-head mode: {e}")
+        dual_head = False
+
+print(f"Loaded {len(source_names)} classes, dual_head={dual_head}")
+
+
+def get_backbone_features(pixel_values):
+    """提取 backbone 特征 (CLS token)"""
+    # 获取 backbone (BEiT 模型)
+    if hasattr(model, 'beit'):
+        outputs = model.beit(pixel_values)
+        features = outputs.last_hidden_state[:, 0]  # CLS token
+    elif hasattr(model, 'vit'):
+        outputs = model.vit(pixel_values)
+        features = outputs.last_hidden_state[:, 0]
+    else:
+        # 通用方法
+        for name, module in model.named_children():
+            if name not in ["classifier", "head", "fc"]:
+                outputs = module(pixel_values)
+                if hasattr(outputs, 'pooler_output') and outputs.pooler_output is not None:
+                    features = outputs.pooler_output
+                else:
+                    features = outputs.last_hidden_state[:, 0]
+                break
+    return features
 
 
 def predict(image: Image.Image):
@@ -48,19 +93,32 @@ def predict(image: Image.Image):
         outputs = model(**inputs)
         probs = torch.softmax(outputs.logits, dim=-1)[0]
 
-    # Top-1 决定 + 置信度
+        # 双头模式：使用二分类头
+        if dual_head and binary_head is not None:
+            features = get_backbone_features(inputs["pixel_values"])
+            binary_logits = binary_head(features)
+            binary_probs = torch.softmax(binary_logits, dim=-1)[0]
+            human_prob = binary_probs[0].item()  # index 0 = Real
+            ai_prob = binary_probs[1].item()     # index 1 = AI
+            is_real = human_prob > ai_prob
+        else:
+            # 原有逻辑：Top-1 决定
+            pred_idx = probs.argmax().item()
+            predicted_source_top1 = source_names[pred_idx]
+            confidence = probs[pred_idx].item()
+            is_real = source_is_real.get(predicted_source_top1, False)
+
+            if is_real:
+                human_prob = confidence
+                ai_prob = 1.0 - human_prob
+            else:
+                ai_prob = confidence
+                human_prob = 1.0 - ai_prob
+
+    # Top-1 多分类预测 (用于显示来源)
     pred_idx = probs.argmax().item()
     predicted_source = source_names[pred_idx]
     confidence = probs[pred_idx].item()
-    is_real = source_is_real.get(predicted_source, False)
-
-    # 根据 top-1 预测计算概率
-    if is_real:
-        human_prob = confidence
-        ai_prob = 1.0 - human_prob
-    else:
-        ai_prob = confidence
-        human_prob = 1.0 - ai_prob
 
     # Get top 3 AI sources only (exclude real sources)
     ai_sources = []
@@ -77,7 +135,8 @@ def predict(image: Image.Image):
         "ai_probability": round(ai_prob, 3),
         "human_probability": round(human_prob, 3),
         "predicted_source": predicted_source,
-        "top3_sources": top3_sources
+        "top3_sources": top3_sources,
+        "dual_head": dual_head,
     }
 
     # Top predictions for bar chart (keep for UI)
@@ -91,8 +150,9 @@ def predict(image: Image.Image):
     top_preds = dict(sorted(top_preds.items(), key=lambda x: x[1], reverse=True)[:10])
 
     # Summary
+    mode_note = " *(Binary Head)*" if dual_head else ""
     summary = f"""
-**Verdict**: {"Real Image" if is_real else "AI Generated"}
+**Verdict**: {"Real Image" if is_real else "AI Generated"}{mode_note}
 
 **Predicted Source**: {predicted_source}
 
@@ -100,7 +160,7 @@ def predict(image: Image.Image):
 
 ---
 
-### Aggregate Probabilities
+### Real vs AI Probabilities
 
 | Category | Probability |
 |----------|-------------|
