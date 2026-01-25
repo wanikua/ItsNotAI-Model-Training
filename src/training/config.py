@@ -212,6 +212,30 @@ class TrainingConfig:
             binary_class_weights=[1.5, 1.0],
         )
 
+    @classmethod
+    def for_colab_a100_high_ram(cls) -> "TrainingConfig":
+        """Colab A100 High RAM (80GB) 优化配置"""
+        return cls(
+            pretrained_model_path="boluobobo/ItsNotAI-ai-detector-v1",
+            multiclass=True,
+            dual_head=True,
+            balance_classes=False,
+            # A100 80GB 可以用更大 batch
+            batch_size=256,
+            gradient_accumulation_steps=1,  # 不需要梯度累积
+            use_amp=True,
+            num_workers=4,  # 更多 workers
+            pin_memory=True,
+            num_epochs=5,
+            learning_rate=2e-5,  # 大 batch 可以用稍大学习率
+            warmup_ratio=0.05,  # 大 batch 需要更少 warmup
+            data_root=Path('/content/data'),
+            output_dir=Path('/content/outputs'),
+            binary_class_weights=[1.5, 1.0],
+            strong_augmentation=True,
+            eval_every_n_steps=200,  # 更频繁评估
+        )
+
 
 @dataclass
 class EvalConfig:
