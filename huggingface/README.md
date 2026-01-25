@@ -7,11 +7,20 @@ library_name: transformers
 pipeline_tag: image-classification
 tags:
 - ai-detection
-- deepfake
+- ai-image-detection
+- deepfake-detection
+- fake-image-detection
+- ai-art-detection
+- stable-diffusion-detection
+- midjourney-detection
+- dall-e-detection
 - image-classification
+- image-forensics
+- digital-art-verification
 - vit
 - beit
 - pytorch
+- computer-vision
 datasets:
 - artifact
 metrics:
@@ -43,9 +52,23 @@ model-index:
 
 # ItsNotAI v1 - Multiclass AI Image Detector
 
-A Vision Transformer model fine-tuned to detect AI-generated images and identify their source generator.
+> **Detect AI-generated images | Identify the AI generator | Verify human-made artwork**
+
+A state-of-the-art Vision Transformer model that detects AI-generated images with **93.5% accuracy** and identifies the specific AI generator used.
 
 **Website**: [https://itsnotai.org](https://itsnotai.org)
+
+---
+
+## Demo: See It In Action
+
+| AI Generated | Real Artwork |
+|:---:|:---:|
+| ![AI Generated](https://substack-post-media.s3.amazonaws.com/public/images/c6e4cb48-6f63-426d-8e55-4f54870592a7_354x338.png) | ![Real Painting](https://substack-post-media.s3.amazonaws.com/public/images/8aba102b-5739-4fd7-8d6c-d479c702f253_1510x983.png) |
+| **Result: AI Generated (69.2%)** | **Result: Real (67.5%)** |
+| Detected: Diffusion-based model | Gauguin's "Entrance to the Village of Osny" |
+
+---
 
 ## About ItsNotAI
 
